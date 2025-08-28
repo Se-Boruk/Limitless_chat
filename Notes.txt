@@ -1,0 +1,5 @@
+Model Wombocombo 14B choć udziela poprawnych odpowiedzi to bardzo je rozciąga i jedynie sztuczny limit wypowiedzi hamuje go
+przed nieskonczonym odpowiadaniem
+
+Nawet jesli juz skonczy swoja wypowiedz to ja powtarza (w troche inny sposob ale mowi o tym samym),
+lub calkowicie zmienia temat i gada od rzeczy

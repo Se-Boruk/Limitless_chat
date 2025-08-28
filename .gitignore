@@ -1,0 +1,17 @@
+# Ignore everything in these directories
+AI_Assistant_project/Models/*
+AI_Assistant_project/Offline_lib_pdf/*
+AI_Assistant_project/Offline_lib_vector/*
+
+AI_Assistant_project/AI_Assistant_main/__pycache__/*
+AI_Assistant_project/AI_Assistant_main/llm/__pycache__/*
+
+# Ignore these files
+# Example_file.txt
+
+# Exclude these files from being ignored
+# !/Documents/Example_file.txt
+
+
+
+
