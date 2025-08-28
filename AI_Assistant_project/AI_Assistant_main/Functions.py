@@ -77,11 +77,16 @@ def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_similar
     user_messages = [m['content'] for m in messages if m['role'] == 'user']
     
     query = user_messages[-1]
-    rag_results = vector_lib.search(query, top_k=top_n)
+    rag_results = vector_lib.search(query,
+                                    top_n = top_n,
+                                    similarity_threshold = min_similarity,
+                                    absolute_min = 0.0
+                                    )
     
-    _, max_sim = max(rag_results, key=lambda x: x[1])
-    
+    print(len(rag_results))
+    print(rag_results)
 
+    
     if rag_results:
         # filter relevant
         relevant_chunks = [chunk for chunk, score in rag_results if score >= min_similarity]
@@ -104,9 +109,8 @@ def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_similar
             return prompt, RAG_response
         
         else:
-            RAG_response = (False, max_sim)
+            RAG_response = (False, "None")
             
-
 
     # if RAG enabled but no chunks found, just fall back to normal response
     prompt = tokenizer.apply_chat_template(

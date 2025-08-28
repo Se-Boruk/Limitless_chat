@@ -28,7 +28,7 @@ GENERATION_PARAMS = {
 RAG_PARAMS = {
     "use_RAG": True,
     "top_n": 3,
-    "min_similarity": 0.4,
-    "chunk_size": 512,
-    "chunk_overlap": 96
+    "min_similarity": 0.55,
+    "chunk_size": 320,
+    "chunk_overlap": 128
     }
