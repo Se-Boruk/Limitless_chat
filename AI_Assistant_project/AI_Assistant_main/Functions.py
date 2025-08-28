@@ -1,6 +1,6 @@
 
 
-def build_chat_prompt(messages, add_generation_prompt=True) -> str:
+def emergency_chat_prompt(messages, add_generation_prompt=True) -> str:
     """
     Build a ChatML-formatted prompt from a list of messages.
 
@@ -24,7 +24,7 @@ def build_chat_prompt(messages, add_generation_prompt=True) -> str:
     return prompt, RAG_response
 
 
-def build_chat_prompt_with_rag(messages, vector_lib, top_n=3, min_similarity=0.75, add_generation_prompt=True) -> str:
+def emergency_chat_prompt_rag(messages, vector_lib, top_n=3, min_similarity=0.75, add_generation_prompt=True) -> str:
     """
     Build ChatML-formatted prompt using conversation history and RAG search on the latest user query.
 
@@ -66,3 +66,56 @@ def build_chat_prompt_with_rag(messages, vector_lib, top_n=3, min_similarity=0.7
         prompt += "<|im_start|>assistant\n"
 
     return prompt, RAG_response
+
+
+
+
+def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_similarity=0.75, add_generation_prompt=True):
+    
+    
+    RAG_response = (False, "None")
+    user_messages = [m['content'] for m in messages if m['role'] == 'user']
+    
+    query = user_messages[-1]
+    rag_results = vector_lib.search(query, top_k=top_n)
+    
+    _, max_sim = max(rag_results, key=lambda x: x[1])
+    
+
+    if rag_results:
+        # filter relevant
+        relevant_chunks = [chunk for chunk, score in rag_results if score >= min_similarity]
+        if relevant_chunks:
+            _, max_sim = max(rag_results, key=lambda x: x[1])
+            RAG_response = (True, max_sim)
+            context_text = "\n\n".join(relevant_chunks[:top_n])
+
+            # minimal rag-enriched history
+            rag_history = [
+                {"role": "system", "content": f"The following context may be useful:\n{context_text}"},
+                {"role": "user", "content": query}
+            ]
+
+            prompt = tokenizer.apply_chat_template(
+                rag_history,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            return prompt, RAG_response
+        
+        else:
+            RAG_response = (False, max_sim)
+            
+
+
+    # if RAG enabled but no chunks found, just fall back to normal response
+    prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    return prompt, RAG_response
+
+
+
+

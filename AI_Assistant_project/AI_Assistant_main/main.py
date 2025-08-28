@@ -381,15 +381,36 @@ class MainWindow(QMainWindow):
         self._generate_response()
 
     def _generate_response(self):
-        if RAG_PARAMS['use_RAG']:
-            prompt, RAG_present = Functions.build_chat_prompt_with_rag(self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_similarity'])
-        else:
-            prompt, RAG_present = Functions.build_chat_prompt(self.chat_history)
         
+        if RAG_PARAMS['use_RAG']:
+            #Trying to use built in chat template builder, if not use the emergency one from functions
+            try:
+                prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_similarity'])
+            except:
+                print("Could not use native prompt builder - Initializing emergency one from built in functions...")
+                prompt, RAG_present = Functions.emergency_chat_prompt_rag(self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_similarity'])
+                print("Processing prompt done!")
+                    
+        else:
+            
+            RAG_present = (False, "None")
+            #Trying to use built in chat template builder, if not use the emergency one from functions
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                                                self.chat_history,
+                                                tokenize=False,
+                                                add_generation_prompt=True
+                                            )
+            except:
+                print("Could not use native prompt builder - Initializing emergency one from built in functions...")
+                prompt, RAG_present = Functions.build_chat_prompt(self.chat_history)
+                print("Processing prompt done!")
+            
+        ##############################################
         self.log(f"RAG context present: {RAG_present[0]}, max similarity: {RAG_present[1]}")
         
         print(f"Total tokens: {len(self.tokenizer(prompt)['input_ids'])}")
-        print("\n\nPrompt: ", prompt,"\n\n") # For debug
+        print("\n\nPrompt: ", prompt,"\n\n") # For debug ant testing, visible just in console
         
         inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda:0")
         eos = self.tokenizer.eos_token_id
