@@ -12,11 +12,11 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from chromadb import PersistentClient
 from chromadb.utils import embedding_functions
 import numpy as np
-from sentence_transformers import CrossEncoder
-from sklearn.preprocessing import MinMaxScaler
+from torch.amp import autocast
 import torch
 
-
+from transformers import AutoModel, AutoTokenizer
+from sentence_transformers import models
 
 from config import RAG_EMBEDDER_PATH, RAG_CROSS_ENC_PATH, RAG_BATCH_SIZE
 
@@ -43,9 +43,41 @@ class UniversalVectorStore:
         self.chroma_db_dir = chroma_db_folder
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-    
+
         os.makedirs(self.chroma_db_dir, exist_ok=True)
+        
+    def unload(self):
+        # --- Safe delete helper ---
+        def safe_del(attr_name):
+            if hasattr(self, attr_name):
+                attr = getattr(self, attr_name)
+                if attr is not None:
+                    try:
+                        # Move model off GPU if it has `.cpu()`
+                        if hasattr(attr, 'cpu'):
+                            attr.cpu()
+                        delattr(self, attr_name)
+                    except:
+                        pass
+                setattr(self, attr_name, None)
     
+        # --- Delete all relevant attributes safely ---
+        safe_del('embedder')
+        safe_del('tokenizer')
+        safe_del('embedding_func')
+        safe_del('client')
+        safe_del('collection')
+        safe_del('cross_encoder')
+    
+        # --- Force garbage collection and free CUDA memory ---
+        gc.collect()
+        torch.cuda.empty_cache()  
+ 
+
+    def load_model_fp32(self):
+        self.unload()  # clean before loading new  
+        
+        print("Loading fp32 embedder for RAG...")
         # --- Load embedder on GPU ---
         self.embedder = SentenceTransformer(RAG_EMBEDDER_PATH, device='cuda', trust_remote_code=True)
     
@@ -58,6 +90,52 @@ class UniversalVectorStore:
             name="universal_collection",
             embedding_function=self.embedding_func
         )
+        print("Loaded!")
+        # --- Force garbage collection and free CUDA memory ---
+        gc.collect()
+        torch.cuda.empty_cache()  
+
+    def load_model_fp16(self):
+        self.unload()  # clean before loading new  
+        
+        print("Loading fp16 embedder for RAG...")
+        # --- Load tokenizer and model in FP16 ---
+        tokenizer = AutoTokenizer.from_pretrained(RAG_EMBEDDER_PATH, trust_remote_code=True)
+        base_model = AutoModel.from_pretrained(
+            RAG_EMBEDDER_PATH,
+            torch_dtype=torch.float16,   # FP16
+            device_map="cuda",
+            trust_remote_code=True
+        )
+
+        # --- Wrap model + tokenizer into SentenceTransformer ---
+        # We keep the original ST style: pooling + transformer
+        word_embedding_model = models.Transformer(RAG_EMBEDDER_PATH)
+        word_embedding_model.auto_model = base_model
+        word_embedding_model.tokenizer = tokenizer
+
+        pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension())
+        self.embedder = SentenceTransformer(modules=[word_embedding_model, pooling_model], device="cuda")
+
+        # --- Wrap embedding function for Chroma (float16) ---
+        self.embedding_func = LocalEmbeddingFunction(self.embedder)
+
+        # --- Persistent Chroma client ---
+        self.client = PersistentClient(path=self.chroma_db_dir)
+        self.collection = self.client.get_or_create_collection(
+            name="universal_collection",
+            embedding_function=self.embedding_func
+        )
+        print("Loaded!")
+        
+
+        print("Loading cross encoder in FP16...")
+        self.cross_encoder = CrossEncoder(RAG_CROSS_ENC_PATH, device='cuda')
+        self.cross_encoder.model = self.cross_encoder.model.half()  # convert weights to FP16
+        print("Loaded!")
+        # --- Force garbage collection and free CUDA memory ---
+        gc.collect()
+        torch.cuda.empty_cache()  
 
     # --- Context manager for cleanup ---
     def __enter__(self):
@@ -341,17 +419,19 @@ class UniversalVectorStore:
         filtered = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_n * 15]
 
         print("Best embedder score: ",filtered[0][1])
-        # --- Prepare cross-encoder ---
-        cross_encoder = CrossEncoder(RAG_CROSS_ENC_PATH, device='cuda')
+        print("Best embedder paragraph:\n",filtered[0][0])
+
         rerank_pairs = []
         original_docs = []
         for doc, sim, idx in filtered:
-            truncated = self.truncate_doc_for_reranker(doc, cross_encoder)
+            truncated = self.truncate_doc_for_reranker(doc, self.cross_encoder)
             rerank_pairs.append([query, truncated])
             original_docs.append((doc, sim))
 
         # --- Predict reranker scores ---
-        rerank_scores = cross_encoder.predict(rerank_pairs, show_progress_bar=False)
+        with autocast(device_type='cuda', dtype=torch.float16):
+            rerank_scores = self.cross_encoder.predict(rerank_pairs, show_progress_bar=False)
+            
         rerank_scores = np.array(rerank_scores, dtype=np.float32)
 
         # --- Normalize to 0-1 using sigmoid ---
@@ -364,7 +444,9 @@ class UniversalVectorStore:
         relevant_docs = [d for d in reranked_docs if d[1] >= min_relevance]
 
         if not relevant_docs:
-            print("No documents exceed minimum relevance threshold.")
+            best_parag, max_sim = max(reranked_docs, key=lambda x: x[1])
+            print("No documents exceed minimum relevance threshold. Max: ",max_sim)
+            print("Best paragraph (not, included):\n",best_parag)
             return []
         
         # --- Sort descending by reranker score ---

@@ -36,6 +36,9 @@ class IngestWorker(QThread):
     def __init__(self, vector_lib, data_dir):
         super().__init__()
         self.vector_lib = vector_lib
+        
+        self.vector_lib.load_model_fp32()
+        
         self.data_dir = data_dir
 
     def run(self):
@@ -60,6 +63,8 @@ class IngestWorker(QThread):
             self.progress.emit(idx, total)
 
         self.finished.emit(ingested, skipped)
+        
+        
 
 
 class MainWindow(QMainWindow):
@@ -75,7 +80,8 @@ class MainWindow(QMainWindow):
         self.chat_history = []
 
         self.Vector_lib = Modules.UniversalVectorStore(PDF_LIB_DIR, VECTOR_LIB_DIR, RAG_PARAMS['chunk_size'], RAG_PARAMS['chunk_overlap'] )
-
+        self.Vector_lib.load_model_fp16()
+        
         toolbar = QToolBar()
         self.addToolBar(toolbar)
         toolbar.addAction(QAction("Clear Chat", self, triggered=self.clear_chat))
@@ -234,6 +240,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.update_rag_status()
         self.RAG_add_btn.setEnabled(True)
+        
+        #Reload the standard for reading fp16 model
+        self.Vector_lib.load_model_fp16()
 
     def on_ingest_error(self, message):
         # Append error message to rag_status_box without interrupting progress
@@ -383,13 +392,14 @@ class MainWindow(QMainWindow):
     def _generate_response(self):
         
         if RAG_PARAMS['use_RAG']:
+            prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
             #Trying to use built in chat template builder, if not use the emergency one from functions
-            try:
-                prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
-            except:
-                print("Could not use native prompt builder - Initializing emergency one from built in functions...")
-                prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
-                print("Processing prompt done!")
+            #try:
+                #prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
+            #except:
+                #print("Could not use native prompt builder - Initializing emergency one from built in functions...")
+                #prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
+                #print("Processing prompt done!")
                     
         else:
             
