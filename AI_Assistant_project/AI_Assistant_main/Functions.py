@@ -24,53 +24,8 @@ def emergency_chat_prompt(messages, add_generation_prompt=True) -> str:
     return prompt, RAG_response
 
 
-def emergency_chat_prompt_rag(messages, vector_lib, top_n=3, min_similarity=0.75, add_generation_prompt=True) -> str:
-    """
-    Build ChatML-formatted prompt using conversation history and RAG search on the latest user query.
 
-    Args:
-        messages (list): Chat history [{'role': 'system'|'user'|'assistant', 'content': str}, ...]
-        vector_lib: Your PDFVectorStore-like object with .search(query, top_k) -> [(chunk, score), ...]
-        top_n (int): Max number of chunks to inject.
-        min_similarity (float): Similarity threshold for including chunks.
-        add_generation_prompt (bool): Append assistant preamble at the end.
-
-    Returns:
-        str: ChatML prompt with relevant RAG context prepended.
-    """
-    prompt = ""
-
-    # Take the latest user message as the retrieval query
-    user_messages = [m['content'] for m in messages if m['role'] == 'user']
-    if user_messages:
-        query = user_messages[-1]
-        rag_results = vector_lib.search(query, top_k=top_n)
-
-        _, max_sim = max(rag_results, key=lambda x: x[1])
-        
-        # Filter and select chunks
-        relevant_chunks = [chunk for chunk, score in rag_results if score >= min_similarity]
-        if relevant_chunks:
-            RAG_response = (True, max_sim)
-            context_text = "\n\n".join(relevant_chunks[:top_n])
-            prompt += f"<|im_start|>system\nThe following context may be useful:\n{context_text}\n<|im_end|>\n"
-        else:
-            RAG_response = (False, max_sim)
-    # Add the conversation messages
-    for message in messages:
-        role = message['role']
-        content = message['content'].strip()
-        prompt += f"<|im_start|>{role}\n{content}<|im_end|>\n"
-
-    if add_generation_prompt:
-        prompt += "<|im_start|>assistant\n"
-
-    return prompt, RAG_response
-
-
-
-
-def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_similarity=0.75, add_generation_prompt=True):
+def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True):
     
     
     RAG_response = (False, "None")
@@ -79,8 +34,8 @@ def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_similar
     query = user_messages[-1]
     rag_results = vector_lib.search(query,
                                     top_n = top_n,
-                                    absolute_cosine_min = 0.1,
-                                    min_relevance = min_similarity
+                                    absolute_cosine_min = absolute_cosine_min,
+                                    min_relevance = min_relevance
                                     )
     
 

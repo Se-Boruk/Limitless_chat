@@ -17,8 +17,12 @@ INIT_PROMPT_FILE = os.path.join(BASE_DIR, "init_prompt.txt")
 PDF_LIB_DIR = os.path.join(BASE_DIR_UP, "Offline_lib_pdf")
 VECTOR_LIB_DIR = os.path.join(BASE_DIR_UP, "Offline_lib_vector")
 
-RAG_EMBEDDER_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Embedders", "nomic-embed-text-v2-moe")
-RAG_CROSS_ENC_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Cross_encoders", "ms-marco-MiniLM-L6-v2")
+RAG_EMBEDDER_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Embedders", "KaLM-embedding-multilingual-mini-instruct-v2")
+#RAG_EMBEDDER_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Embedders", "nomic-embed-text-v2-moe")
+
+#RAG_CROSS_ENC_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Cross_encoders", "ms-marco-MiniLM-L6-v2")
+RAG_CROSS_ENC_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Cross_encoders", "mmarco-mMiniLMv2-L12-H384-v1")
+
 
 
 GENERATION_PARAMS = {
@@ -31,7 +35,8 @@ GENERATION_PARAMS = {
 RAG_PARAMS = {
     "use_RAG": True,
     "top_n": 3,
-    "min_similarity": 0.7,
+    "min_relevance": 0.7,
+    'absolute_cosine_min': 0.1,
     "chunk_size": 256,
     "chunk_overlap": 128
     }

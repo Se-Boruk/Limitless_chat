@@ -385,10 +385,10 @@ class MainWindow(QMainWindow):
         if RAG_PARAMS['use_RAG']:
             #Trying to use built in chat template builder, if not use the emergency one from functions
             try:
-                prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_similarity'])
+                prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
             except:
                 print("Could not use native prompt builder - Initializing emergency one from built in functions...")
-                prompt, RAG_present = Functions.emergency_chat_prompt_rag(self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_similarity'])
+                prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
                 print("Processing prompt done!")
                     
         else:
@@ -403,7 +403,7 @@ class MainWindow(QMainWindow):
                                             )
             except:
                 print("Could not use native prompt builder - Initializing emergency one from built in functions...")
-                prompt, RAG_present = Functions.build_chat_prompt(self.chat_history)
+                prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
                 print("Processing prompt done!")
             
         ##############################################
