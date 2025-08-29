@@ -17,6 +17,9 @@ INIT_PROMPT_FILE = os.path.join(BASE_DIR, "init_prompt.txt")
 PDF_LIB_DIR = os.path.join(BASE_DIR_UP, "Offline_lib_pdf")
 VECTOR_LIB_DIR = os.path.join(BASE_DIR_UP, "Offline_lib_vector")
 
+RAG_EMBEDDER_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Embedders", "nomic-embed-text-v2-moe")
+RAG_CROSS_ENC_PATH = os.path.join(BASE_DIR_UP, "Models", "RAG_models", "Cross_encoders", "ms-marco-MiniLM-L6-v2")
+
 
 GENERATION_PARAMS = {
     "max_new_tokens": 512,
@@ -28,7 +31,9 @@ GENERATION_PARAMS = {
 RAG_PARAMS = {
     "use_RAG": True,
     "top_n": 3,
-    "min_similarity": 0.55,
-    "chunk_size": 320,
+    "min_similarity": 0.7,
+    "chunk_size": 256,
     "chunk_overlap": 128
     }
+
+RAG_BATCH_SIZE = 64

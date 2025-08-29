@@ -6,8 +6,8 @@ from fnmatch import fnmatch
 import os
 
 # ——— User Input ———
-SOURCE = "https://huggingface.co/cognitivecomputations/Dolphin3.0-Llama3.1-8B"
-DEST_DIR = "models/Dolphin3.0-Llama3.1-8B"
+SOURCE = "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2"
+DEST_DIR = "downloaded/ms-marco-L6"
 REVISION = None  # e.g. "main" or commit SHA
 PREFERRED = []  # only files matching these patterns
 # —————————————————

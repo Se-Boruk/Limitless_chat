@@ -2,6 +2,8 @@ from chromadb import PersistentClient
 import fitz  # PyMuPDF for reading PDFs
 import os
 
+os.environ["CHROMA_TELEMETRY_ENABLED"] = "false"
+
 PDF_FOLDER = "pdfs_new"
 CHROMA_DB_DIR = "chroma_store"
 

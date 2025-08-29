@@ -1,65 +1,36 @@
-import os
-import gc
-import time
-import shutil
-import fitz
-import xml.etree.ElementTree as ET
+from sentence_transformers import SentenceTransformer, CrossEncoder
+from chromadb.utils import embedding_functions
+from chromadb import PersistentClient
+import os, gc, time, shutil, fitz, re
 from docx import Document
 from bs4 import BeautifulSoup
+import xml.etree.ElementTree as ET
 from ebooklib import epub
-import re
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from chromadb import PersistentClient
-from chromadb.utils import embedding_functions
-import numpy as np
-from sentence_transformers import CrossEncoder
-from sklearn.preprocessing import MinMaxScaler
-import torch
 
 
+from config import RAG_EMBEDDER_PATH
 
-from config import RAG_EMBEDDER_PATH, RAG_CROSS_ENC_PATH, RAG_BATCH_SIZE
 
-
-class LocalEmbeddingFunction(embedding_functions.EmbeddingFunction):
-    def __init__(self, st_model):
-        self.st_model = st_model
-
-    # IMPORTANT: argument must be `input` (Chroma >=0.4.16)
-    def __call__(self, input):
-        # input can be a single string or list of strings
-        if isinstance(input, str):
-            return self.st_model.encode([input], convert_to_numpy=True, show_progress_bar=False)[0]
-        else:
-            return self.st_model.encode(input, convert_to_numpy=True, show_progress_bar=False)
-
-    def name(self):
-        # Required by Chroma
-        return "local_embedder"
-    
 class UniversalVectorStore:
-    def __init__(self, data_folder, chroma_db_folder, chunk_size=256, chunk_overlap=64, embedder_path=None):
+    def __init__(self, data_folder, chroma_db_folder, chunk_size=256, chunk_overlap=64):
         self.data_folder = data_folder
         self.chroma_db_dir = chroma_db_folder
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-    
+
         os.makedirs(self.chroma_db_dir, exist_ok=True)
-    
-        # --- Load embedder on GPU ---
-        self.embedder = SentenceTransformer(RAG_EMBEDDER_PATH, device='cuda', trust_remote_code=True)
-    
-        # --- Wrap embedding function for Chroma (float16) ---
-        self.embedding_func = LocalEmbeddingFunction(self.embedder)
-    
-        # --- Persistent Chroma client ---
+
+        # Embedder
+        self.embedder = SentenceTransformer(RAG_EMBEDDER_PATH, trust_remote_code=True)
+        self.embedding_func = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=RAG_EMBEDDER_PATH, trust_remote_code=True)
+
+        # Persistent Chroma client
         self.client = PersistentClient(path=self.chroma_db_dir)
         self.collection = self.client.get_or_create_collection(
             name="universal_collection",
             embedding_function=self.embedding_func
         )
 
-    # --- Context manager for cleanup ---
     def __enter__(self):
         return self
 
@@ -79,7 +50,7 @@ class UniversalVectorStore:
                         shutil.rmtree(file_path)
         except Exception as e:
             print(f"Error during cleanup: {e}")
-
+            
     def get_ingestion_status(self):
         status = {}
         for filename in os.listdir(self.data_folder):
@@ -88,7 +59,7 @@ class UniversalVectorStore:
             status[filename] = self.file_already_ingested(filename)
         return status
 
-    # --- Utility functions ---
+    # --- Text chunking ---
     def chunk_text(self, text):
         words = text.split()
         chunks = []
@@ -100,6 +71,7 @@ class UniversalVectorStore:
             start += self.chunk_size - self.chunk_overlap
         return chunks
 
+    # --- Section detection for PDFs ---
     def detect_section_type(self, text, page_num=None, total_pages=None):
         text_lower = text.lower()
         toc_keywords = ["table of contents", "contents"]
@@ -121,6 +93,7 @@ class UniversalVectorStore:
 
         return "content"
 
+    # --- Check if file already ingested ---
     def file_already_ingested(self, filename):
         try:
             results = self.collection.get(where={"source": filename}, limit=1)
@@ -129,53 +102,67 @@ class UniversalVectorStore:
             print(f"Warning: Could not get collection entries for {filename}: {e}")
             return False
 
-    # --- File ingestion ---
+    # --- File ingestion methods ---
     def add_pdf(self, pdf_path):
         pdf_name = os.path.basename(pdf_path)
         if self.file_already_ingested(pdf_name):
             print(f"Skipping already ingested PDF: {pdf_name}")
             return
+
         print(f"Processing PDF: {pdf_name}")
-        
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
+
         for page_num, page in enumerate(doc, start=1):
             text = page.get_text("text")
             if not text.strip():
                 continue
+
             section_type = self.detect_section_type(text, page_num, total_pages)
             chunks = self.chunk_text(text)
-            self._add_chunks(pdf_name, chunks, section_type, page_num)
+            for i, chunk in enumerate(chunks):
+                uid = f"{pdf_name}_p{page_num}_c{i}"
+                metadata = {"source": pdf_name, "page": page_num, "section_type": section_type}
+                self.collection.add(documents=[chunk], metadatas=[metadata], ids=[uid])
 
     def add_docx(self, docx_path):
         docx_name = os.path.basename(docx_path)
         if self.file_already_ingested(docx_name):
+            print(f"Skipping already ingested DOCX: {docx_name}")
             return
+
         print(f"Processing DOCX: {docx_name}")
-        
         doc = Document(docx_path)
-        text = "\n".join([p.text.strip() for p in doc.paragraphs if p.text.strip()])
+        full_text = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
+        text = "\n".join(full_text)
         chunks = self.chunk_text(text)
-        self._add_chunks(docx_name, chunks, "content")
+        for i, chunk in enumerate(chunks):
+            uid = f"{docx_name}_chunk{i}"
+            metadata = {"source": docx_name, "section_type": "content"}
+            self.collection.add(documents=[chunk], metadatas=[metadata], ids=[uid])
 
     def add_txt(self, txt_path):
         txt_name = os.path.basename(txt_path)
         if self.file_already_ingested(txt_name):
+            print(f"Skipping already ingested TXT: {txt_name}")
             return
 
         print(f"Processing TXT: {txt_name}")
-
         with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
         chunks = self.chunk_text(text)
-        self._add_chunks(txt_name, chunks, "content")
+        for i, chunk in enumerate(chunks):
+            uid = f"{txt_name}_chunk{i}"
+            metadata = {"source": txt_name, "section_type": "content"}
+            self.collection.add(documents=[chunk], metadatas=[metadata], ids=[uid])
 
     def add_xml(self, xml_path):
         xml_name = os.path.basename(xml_path)
         if self.file_already_ingested(xml_name):
+            print(f"Skipping already ingested XML: {xml_name}")
             return
+
         print(f"Processing XML: {xml_name}")
-        
         try:
             tree = ET.parse(xml_path)
             root = tree.getroot()
@@ -192,16 +179,20 @@ class UniversalVectorStore:
             recursive_text_extract(root)
             full_text = "\n".join(texts)
             chunks = self.chunk_text(full_text)
-            self._add_chunks(xml_name, chunks, "content")
+            for i, chunk in enumerate(chunks):
+                uid = f"{xml_name}_chunk{i}"
+                metadata = {"source": xml_name, "section_type": "content"}
+                self.collection.add(documents=[chunk], metadatas=[metadata], ids=[uid])
         except Exception as e:
             print(f"Failed to parse XML {xml_name}: {e}")
 
     def add_epub(self, epub_path):
         epub_name = os.path.basename(epub_path)
         if self.file_already_ingested(epub_name):
+            print(f"Skipping already ingested EPUB: {epub_name}")
             return
+
         print(f"Processing EPUB: {epub_name}")
-        
         try:
             book = epub.read_epub(epub_path)
             texts = []
@@ -213,24 +204,33 @@ class UniversalVectorStore:
                         texts.append(text.strip())
             full_text = "\n".join(texts)
             chunks = self.chunk_text(full_text)
-            self._add_chunks(epub_name, chunks, "content")
+            for i, chunk in enumerate(chunks):
+                uid = f"{epub_name}_chunk{i}"
+                metadata = {"source": epub_name, "section_type": "content"}
+                self.collection.add(documents=[chunk], metadatas=[metadata], ids=[uid])
         except Exception as e:
             print(f"Failed to parse EPUB {epub_name}: {e}")
 
     def add_html(self, html_path):
         html_name = os.path.basename(html_path)
         if self.file_already_ingested(html_name):
+            print(f"Skipping already ingested HTML: {html_name}")
             return
+
         print(f"Processing HTML: {html_name}")
-        
         try:
             with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             soup = BeautifulSoup(content, 'html.parser')
             text = soup.get_text(separator='\n')
-            if text.strip():
-                chunks = self.chunk_text(text)
-                self._add_chunks(html_name, chunks, "content")
+            if not text.strip():
+                print(f"No text extracted from HTML {html_name}")
+                return
+            chunks = self.chunk_text(text)
+            for i, chunk in enumerate(chunks):
+                uid = f"{html_name}_chunk{i}"
+                metadata = {"source": html_name, "section_type": "content"}
+                self.collection.add(documents=[chunk], metadatas=[metadata], ids=[uid])
         except Exception as e:
             print(f"Failed to parse HTML {html_name}: {e}")
 
@@ -253,126 +253,61 @@ class UniversalVectorStore:
 
     def ingest_all(self):
         for filename in os.listdir(self.data_folder):
-            if self.is_supported_file(filename):
-                self.add_file(os.path.join(self.data_folder, filename))
+            if not self.is_supported_file(filename):
+                continue
+            file_path = os.path.join(self.data_folder, filename)
+            self.add_file(file_path)
         print("Incremental ingestion complete.")
 
     def is_supported_file(self, filename):
         lower = filename.lower()
         return lower.endswith((".pdf", ".docx", ".txt", ".xml", ".epub", ".html", ".htm"))
 
-    # --- Internal chunk addition with GPU embeddings ---
-    def _add_chunks(self, source_name, chunks, section_type, page_num=None):
-        # GPU batch processing
-        batch_size = RAG_BATCH_SIZE
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i+batch_size]
-            embeddings = self.embedder.encode(batch, convert_to_tensor=True, normalize_embeddings=True, device='cuda')
-            embeddings = embeddings.cpu().numpy()
-            for j, emb in enumerate(embeddings):
-                uid = f"{source_name}_chunk{i+j}" + (f"_p{page_num}" if page_num else "")
-                metadata = {"source": source_name, "section_type": section_type}
-                if page_num:
-                    metadata["page"] = page_num
-                self.collection.add(documents=[batch[j]], metadatas=[metadata], ids=[uid])
-
-
-
-    # --- GPU-accelerated RAG search ---
-    def safe_cosine(self, a, b):
-        a = np.asarray(a, dtype=np.float32)
-        b = np.asarray(b, dtype=np.float32)
-        na = np.linalg.norm(a)
-        nb = np.linalg.norm(b)
-        if na == 0 or nb == 0:
-            return 0.0
-        return float(np.dot(a, b) / (na * nb))
-
-
-    def convert_distance_to_cosine(self, distances, doc_embeddings=None, query_embedding=None):
-        if doc_embeddings is not None and query_embedding is not None:
-            q = np.asarray(query_embedding, dtype=np.float32).ravel()
-            return [self.safe_cosine(q, d) for d in doc_embeddings]
-        d = np.array(distances, dtype=np.float32)
-        if d.max() <= 1.05:
-            return (1.0 - d).tolist()
-        return (1.0 - (d ** 2) / 2.0).tolist()
-
-
-    def truncate_doc_for_reranker(self, doc_text, cross_enc_model, max_len=480):
-        try:
-            tokenizer = cross_enc_model.tokenizer
-            tokens = tokenizer(doc_text, truncation=True, max_length=max_len, return_tensors="pt")
-            truncated = tokenizer.decode(tokens["input_ids"][0], skip_special_tokens=True)
-            return truncated
-        except Exception:
-            return doc_text[: max_len * 4]
-
-
-    def search(self, query, top_n=3, absolute_cosine_min=0.1, min_relevance=0.7):
-        # --- Encode query ---
-        query_embedding = self.embedder.encode(
-            query,
-            convert_to_tensor=True,
-            normalize_embeddings=True,
-            device='cuda'  # or 'cpu'
-        )
-
-        # --- Query vector DB ---
+    # --- RAG-aware search with thresholds and re-ranking ---
+    def search(self, query, top_n=3, similarity_threshold=0.5, absolute_min=0.15,
+               reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
+    
+        query_embedding = self.embedder.encode(query, convert_to_tensor=True).cpu().numpy()
         results = self.collection.query(
-            query_embeddings=[query_embedding.cpu().numpy()],
-            n_results=top_n * 15,
-            include=["documents", "distances", "embeddings"]
+            query_embeddings=[query_embedding],
+            n_results=top_n,
+            include=["documents", "distances"]
         )
+    
         documents = results.get("documents", [[]])[0]
         distances = results.get("distances", [[]])[0]
-        doc_embeddings = results.get("embeddings", [[]])[0]
-
-        # --- Convert distances to cosine ---
-        use_doc_embeddings = doc_embeddings if (doc_embeddings is not None and len(doc_embeddings) > 0) else None
-        cosines = self.convert_distance_to_cosine(distances, use_doc_embeddings, query_embedding.cpu().numpy())
-
-        # --- Filter by absolute cosine min ---
-        filtered = [(doc, sim, idx) for idx, (doc, sim) in enumerate(zip(documents, cosines)) if sim >= absolute_cosine_min]
+        similarities = [1 - d for d in distances]  # cosine similarity
+    
+        # Absolute minimum cutoff
+        filtered = [(doc, sim) for doc, sim in zip(documents, similarities) if sim >= absolute_min]
+    
         if not filtered:
-            print("No documents above absolute cosine minimum.")
-            return []
-
-        filtered = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_n * 15]
-
-        print("Best embedder score: ",filtered[0][1])
-        # --- Prepare cross-encoder ---
-        cross_encoder = CrossEncoder(RAG_CROSS_ENC_PATH, device='cuda')
-        rerank_pairs = []
-        original_docs = []
-        for doc, sim, idx in filtered:
-            truncated = self.truncate_doc_for_reranker(doc, cross_encoder)
-            rerank_pairs.append([query, truncated])
-            original_docs.append((doc, sim))
-
-        # --- Predict reranker scores ---
-        rerank_scores = cross_encoder.predict(rerank_pairs, show_progress_bar=False)
-        rerank_scores = np.array(rerank_scores, dtype=np.float32)
-
-        # --- Normalize to 0-1 using sigmoid ---
-        rerank_scores_norm = 1 / (1 + np.exp(-rerank_scores))
-
-        # --- Zip rerank scores with original docs ---
-        reranked_docs = [(doc, float(score)) for (doc, _), score in zip(original_docs, rerank_scores_norm)]
-
-        # --- Filter by minimum relevance ---
-        relevant_docs = [d for d in reranked_docs if d[1] >= min_relevance]
-
-        if not relevant_docs:
-            print("No documents exceed minimum relevance threshold.")
-            return []
-        
-        # --- Sort descending by reranker score ---
-        relevant_docs = sorted(relevant_docs, key=lambda x: x[1], reverse=True)
-
-        top_docs = relevant_docs[:top_n]
-        _, max_rerank_sim = max(top_docs, key=lambda x: x[1])
-        print("Best rerank score: ", max_rerank_sim)
-        
-        # --- Return top_n of relevant docs ---
-        return top_docs
+            # rerank all top_n with cross-encoder
+            cross_encoder = CrossEncoder(reranker_model)
+            rerank_pairs = [[query, doc] for doc in documents]
+            rerank_scores = cross_encoder.predict(rerank_pairs)
+            reranked_docs = sorted(zip(documents, rerank_scores), key=lambda x: x[1], reverse=True)
+            return reranked_docs[:top_n]
+    
+        # similarity threshold logic
+        above_threshold = [(doc, sim) for doc, sim in filtered if sim >= similarity_threshold]
+    
+        if len(above_threshold) == top_n:
+            return above_threshold
+        elif len(above_threshold) > 0:
+            return above_threshold
+        else:
+            # rerank filtered ones
+            cross_encoder = CrossEncoder(reranker_model)
+            rerank_pairs = [[query, doc] for doc, _ in filtered]
+            rerank_scores = cross_encoder.predict(rerank_pairs)
+            reranked_docs = sorted(zip([doc for doc, _ in filtered], rerank_scores), key=lambda x: x[1], reverse=True)
+            return reranked_docs[:top_n]
+    
+    
+    
+    
+    
+    
+    
+    

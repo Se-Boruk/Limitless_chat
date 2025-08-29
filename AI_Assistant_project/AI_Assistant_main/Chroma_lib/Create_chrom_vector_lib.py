@@ -7,6 +7,8 @@ from sentence_transformers import SentenceTransformer
 from chromadb import PersistentClient
 from chromadb.utils import embedding_functions
 
+os.environ["CHROMA_TELEMETRY_ENABLED"] = "false"
+
 # Get current file directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Folder up

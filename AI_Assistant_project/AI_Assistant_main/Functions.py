@@ -79,21 +79,19 @@ def native_chat_prompt_rag(tokenizer, messages, vector_lib, top_n=3, min_similar
     query = user_messages[-1]
     rag_results = vector_lib.search(query,
                                     top_n = top_n,
-                                    similarity_threshold = min_similarity,
-                                    absolute_min = 0.0
+                                    absolute_cosine_min = 0.1,
+                                    min_relevance = min_similarity
                                     )
     
-    print(len(rag_results))
-    print(rag_results)
 
-    
     if rag_results:
         # filter relevant
-        relevant_chunks = [chunk for chunk, score in rag_results if score >= min_similarity]
+        relevant_chunks = [chunk for chunk, score in rag_results]
         if relevant_chunks:
             _, max_sim = max(rag_results, key=lambda x: x[1])
             RAG_response = (True, max_sim)
-            context_text = "\n\n".join(relevant_chunks[:top_n])
+            
+            context_text = "\n\n".join(relevant_chunks)
 
             # minimal rag-enriched history
             rag_history = [
