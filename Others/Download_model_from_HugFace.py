@@ -6,8 +6,8 @@ from fnmatch import fnmatch
 import os
 
 # ——— User Input ———
-SOURCE = "https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
-DEST_DIR = "downloaded/ms-marco-L12-multi"
+SOURCE = "https://huggingface.co/jinaai/jina-embeddings-v3"
+DEST_DIR = "jina-embeddings-v3"
 REVISION = None  # e.g. "main" or commit SHA
 PREFERRED = []  # only files matching these patterns
 # —————————————————

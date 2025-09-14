@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
         self.tokenizer = None
         self.chat_history = []
 
-        self.Vector_lib = Modules.UniversalVectorStore(PDF_LIB_DIR, VECTOR_LIB_DIR, RAG_PARAMS['chunk_size'], RAG_PARAMS['chunk_overlap'] )
+        self.Vector_lib = Modules.UniversalVectorStore(PDF_LIB_DIR, VECTOR_LIB_DIR, RAG_PARAMS['chunk_size'], RAG_PARAMS['overlap_ratio'] )
         self.Vector_lib.load_model_fp16()
         
         toolbar = QToolBar()
