@@ -48,4 +48,4 @@ RAG_PARAMS = {
     "overlap_ratio": 0.25
     }
 
-RAG_BATCH_SIZE = 16
+RAG_BATCH_SIZE = 8

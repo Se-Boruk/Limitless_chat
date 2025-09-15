@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QProgressBar
+from PySide6.QtWidgets import QProgressBar, QCheckBox
 from PySide6.QtWidgets import QScrollArea, QLabel, QSizePolicy
 
 #Backend libs
@@ -37,7 +37,7 @@ class IngestWorker(QThread):
         super().__init__()
         self.vector_lib = vector_lib
         
-        self.vector_lib.load_model_fp32()
+        self.vector_lib.load_model_fp32(load_cross_encoder = False)
         
         self.data_dir = data_dir
 
@@ -80,7 +80,8 @@ class MainWindow(QMainWindow):
         self.chat_history = []
 
         self.Vector_lib = Modules.UniversalVectorStore(PDF_LIB_DIR, VECTOR_LIB_DIR, RAG_PARAMS['chunk_size'], RAG_PARAMS['overlap_ratio'] )
-        self.Vector_lib.load_model_fp16()
+        self.Vector_lib.load_model_fp32()
+        #self.Vector_lib.load_model_fp16() # test with 32, should be 16
         
         toolbar = QToolBar()
         self.addToolBar(toolbar)
@@ -160,6 +161,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMinimum(0)
         self.progress_bar.setVisible(False)
         rag_status_layout.addWidget(self.progress_bar)
+        
 
         self.rag_status_box = QTextEdit()
         self.rag_status_box.setReadOnly(True)
@@ -167,6 +169,36 @@ class MainWindow(QMainWindow):
         self.rag_status_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.rag_status_box.setPlainText("RAG system not initialized.")
         rag_status_layout.addWidget(self.rag_status_box)
+        
+        #Local Rag button option
+        self.RAG_local = QCheckBox("Local RAG")
+        self.RAG_local.setChecked(True)  
+        #self.RAG_local.stateChanged.connect(self.Prepared function)
+        rag_status_layout.addWidget(self.RAG_local)
+        
+        #Online Rag button option
+        self.RAG_online = QCheckBox("Online RAG")
+        self.RAG_online.setChecked(True)  
+        #self.RAG_local.stateChanged.connect(self.Prepared function)
+        rag_status_layout.addWidget(self.RAG_online)
+        
+        #TOR search Rag button option
+        self.RAG_online_TOR_search = QCheckBox("Online RAG - TOR search")
+        self.RAG_online_TOR_search.setChecked(False)  
+        #self.RAG_local.stateChanged.connect(self.Prepared function)
+        rag_status_layout.addWidget(self.RAG_online_TOR_search)
+        
+        #Dark_TOR search Rag button option
+        self.RAG_online_dark_TOR_search = QCheckBox("Online RAG - Dark TOR search")
+        self.RAG_online_dark_TOR_search.setChecked(False)  
+        #self.RAG_local.stateChanged.connect(self.Prepared function)
+        rag_status_layout.addWidget(self.RAG_online_dark_TOR_search)
+        
+        #Allow online only when local, TOR only if online etc.
+        self.RAG_local.stateChanged.connect(self.update_rag_dependencies)
+        self.RAG_online.stateChanged.connect(self.update_rag_dependencies)
+        self.RAG_online_TOR_search.stateChanged.connect(self.update_rag_dependencies)
+        
 
         rag_status_group.setLayout(rag_status_layout)
         left_layout.addWidget(rag_status_group)
@@ -212,6 +244,26 @@ class MainWindow(QMainWindow):
         self.log("Application started. No model loaded.")
         self.update_rag_status()
 
+
+    def update_rag_dependencies(self):
+        # Online depends on Local
+        self.RAG_online.setEnabled(self.RAG_local.isChecked())
+        if not self.RAG_local.isChecked():
+            self.RAG_online.setChecked(False)
+
+        # Online1 depends on Online
+        self.RAG_online_TOR_search.setEnabled(self.RAG_online.isChecked())
+        if not self.RAG_online.isChecked():
+            self.RAG_online_TOR_search.setChecked(False)
+
+        # Online2 depends on Online1
+        self.RAG_online_dark_TOR_search.setEnabled(self.RAG_online_TOR_search.isChecked())
+        if not self.RAG_online_TOR_search.isChecked():
+            self.RAG_online_dark_TOR_search.setChecked(False)
+
+
+
+
     def on_update_rag_lib(self):
         if not hasattr(self, "Vector_lib") or self.Vector_lib is None:
             self.rag_status_box.setPlainText("RAG system not initialized.")
@@ -242,7 +294,8 @@ class MainWindow(QMainWindow):
         self.RAG_add_btn.setEnabled(True)
         
         #Reload the standard for reading fp16 model
-        self.Vector_lib.load_model_fp16()
+        self.Vector_lib.load_model_fp32()
+        #self.Vector_lib.load_model_fp16() # test with 32, should be 16
 
     def on_ingest_error(self, message):
         # Append error message to rag_status_box without interrupting progress
@@ -343,7 +396,26 @@ class MainWindow(QMainWindow):
             QLineEdit { background-color: #3c3f4c; color: #ffffff; }
             QPushButton, QComboBox { background-color: #61afef; color: #282c34; border-radius: 4px; padding: 4px; }
             QToolBar { background-color: #21252b; }
+    
+            /* Nice checkbox style */
+            QCheckBox {
+                spacing: 10px;                    /* space between box and label */
+                font-size: 10pt;
+                color: #abb2bf;
+            }
+            QCheckBox::indicator {
+                width: 10px;
+                height: 10px;
+                border: 3px solid #3e4451;
+                border-radius: 3px;
+                background-color: #1e222a;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #61afef;
+                border: 3px solid #3e4451;
+            }
         """)
+
         #self.setFont(QFont("Segoe UI", 10))
 
     def log(self, msg):
@@ -391,7 +463,17 @@ class MainWindow(QMainWindow):
 
     def _generate_response(self):
         
-        if RAG_PARAMS['use_RAG']:
+        if self.RAG_online_dark_TOR_search.isChecked():
+            print("Using Dark TOR RAG")
+        
+        elif self.RAG_online_TOR_search.isChecked():
+            print("Using TOR RAG")
+        
+        elif self.RAG_online.isChecked():
+            print("Using online RAG")
+            
+        elif self.RAG_local.isChecked():
+            print("Using local RAG")
             prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
             #Trying to use built in chat template builder, if not use the emergency one from functions
             #try:
@@ -400,9 +482,9 @@ class MainWindow(QMainWindow):
                 #print("Could not use native prompt builder - Initializing emergency one from built in functions...")
                 #prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
                 #print("Processing prompt done!")
-                    
+                
         else:
-            
+            print("No RAG response")
             RAG_present = (False, "None")
             #Trying to use built in chat template builder, if not use the emergency one from functions
             try:
@@ -415,7 +497,11 @@ class MainWindow(QMainWindow):
                 print("Could not use native prompt builder - Initializing emergency one from built in functions...")
                 prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
                 print("Processing prompt done!")
+        
             
+        
+        
+        
         ##############################################
         self.log(f"RAG context present: {RAG_present[0]}, max similarity: {RAG_present[1]}")
         

@@ -40,6 +40,7 @@ class LocalEmbeddingFunction(embedding_functions.EmbeddingFunction):
         # Required by Chroma
         return "local_embedder"
     
+    
 class UniversalVectorStore:
     def __init__(self, data_folder, chroma_db_folder, chunk_size=256, overlap_ratio=0.25, embedder_path=None):
         self.data_folder = data_folder
@@ -77,7 +78,7 @@ class UniversalVectorStore:
         torch.cuda.empty_cache()  
  
 
-    def load_model_fp32(self):
+    def load_model_fp32(self, load_cross_encoder = True):
         self.unload()  # clean before loading new  
         
         print("Loading fp32 embedder for RAG...")
@@ -97,8 +98,17 @@ class UniversalVectorStore:
         # --- Force garbage collection and free CUDA memory ---
         gc.collect()
         torch.cuda.empty_cache()  
+        
+        if load_cross_encoder:
+            print("Loading cross encoder in FP16...")
+            self.cross_encoder = CrossEncoder(RAG_CROSS_ENC_PATH, device='cuda', trust_remote_code=True)
+            self.cross_encoder.model = self.cross_encoder.model.half()  # convert weights to FP16
+            print("Loaded!")
+            # --- Force garbage collection and free CUDA memory ---
+            gc.collect()
+            torch.cuda.empty_cache()  
 
-    def load_model_fp16(self):
+    def load_model_fp16(self, load_cross_encoder = True):
         self.unload()  # clean before loading new  
         
         print("Loading fp16 embedder for RAG...")
@@ -115,7 +125,7 @@ class UniversalVectorStore:
         # We keep the original ST style: pooling + transformer
         word_embedding_model = models.Transformer(
             model_name_or_path=RAG_EMBEDDER_PATH,
-            config_args={"trust_remote_code": True}   # <-- this passes trust_remote_code internally
+            config_args={"trust_remote_code": True}  
         )
         
         word_embedding_model.auto_model = base_model
@@ -135,14 +145,14 @@ class UniversalVectorStore:
         )
         print("Loaded!")
         
-
-        print("Loading cross encoder in FP16...")
-        self.cross_encoder = CrossEncoder(RAG_CROSS_ENC_PATH, device='cuda', trust_remote_code=True)
-        self.cross_encoder.model = self.cross_encoder.model.half()  # convert weights to FP16
-        print("Loaded!")
-        # --- Force garbage collection and free CUDA memory ---
-        gc.collect()
-        torch.cuda.empty_cache()  
+        if load_cross_encoder:
+            print("Loading cross encoder in FP16...")
+            self.cross_encoder = CrossEncoder(RAG_CROSS_ENC_PATH, device='cuda', trust_remote_code=True)
+            self.cross_encoder.model = self.cross_encoder.model.half()  # convert weights to FP16
+            print("Loaded!")
+            # --- Force garbage collection and free CUDA memory ---
+            gc.collect()
+            torch.cuda.empty_cache()  
 
     # --- Context manager for cleanup ---
     def __enter__(self):
@@ -345,7 +355,7 @@ class UniversalVectorStore:
     
         full_text = "".join(all_text)
         chunk_size, overlap_ratio = self.get_dynamic_chunk_size(len(full_text))
-        bs = int(RAG_BATCH_SIZE * (1024/ chunk_size))
+        bs = int(RAG_BATCH_SIZE * (768/ chunk_size))
         #print("Batch size: ",bs)
     
         # Step 2: chunk full_text (keeps multi-page paragraphs intact)
@@ -504,12 +514,12 @@ class UniversalVectorStore:
                     emb_gpu = self.embedder.encode(
                         batch, convert_to_tensor=True, normalize_embeddings=True, device="cuda"
                     )
-                emb_gpu = emb_gpu.float()
+                
             else:
                 emb_gpu = self.embedder.encode(
                     batch, convert_to_tensor=True, normalize_embeddings=True, device="cuda"
                 )
-    
+            emb_gpu = emb_gpu.to(torch.float32)
             emb_cpu = emb_gpu.cpu().numpy()
             del emb_gpu
             torch.cuda.empty_cache()
@@ -587,7 +597,7 @@ class UniversalVectorStore:
             normalize_embeddings=True,
             device='cuda'  # or 'cpu'
         )
-
+        query_embedding = query_embedding.to(torch.float32)
         # --- Query vector DB ---
         results = self.collection.query(
             query_embeddings=[query_embedding.cpu().numpy()],
