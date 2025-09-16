@@ -461,6 +461,69 @@ class MainWindow(QMainWindow):
         self.input_line.clear()
         self._generate_response()
 
+
+    def generate_online_rag_queries(self, k=5):
+        # Get the latest user query
+        user_messages = [m['content'] for m in self.chat_history if m['role'] == 'user']
+        user_query = user_messages[-1]
+    
+        # Instructional prompt for RAG generation
+        rag_request = [
+            {
+                "role": "system",
+                "content": (
+                    f"You are a generator of exactly {k} search queries from the user's request. Follow these simple rules.\n\n"
+                    f"1) OUTPUT: produce exactly {k} lines, one concise search query per line. No numbering, bullets, commentary, or extra text.\n\n"
+                    f"2) STYLE: queries are short keyword-style phrases (not full sentences), suitable for web search.\n\n"
+                    f"3) DIVERSITY: cover different angles (how-to, comparison, overview, feasibility, tutorials, buying/upgrade, safety/ethics, history, etc.). Make each line distinct.\n\n"
+                    f"4) NO ANSWERING: do not answer the user's question yourself — only produce queries.\n\n"
+                    f"5) GREETINGS: if the input is pure small talk or a greeting (very short text of up to 3 words consisting only of common greetings like \"hi\", \"hello\", \"thanks\", \"how are you\"), output {k} lines of the exact token: __NO_SEARCH__ and nothing else.\n\n"
+                    f"6) SPECULATIVE / SILLY INPUTS: if the user asks about implausible or highly speculative things, reframe them into practical, realistic, web-searchable queries (feasibility/current-state, realistic alternatives, or actionable next steps).\n\n"
+                    f"7) VAGUE INPUTS: if the user is vague, include queries that clarify intent: overview, how-to, comparison, and at least one actionable next-step.\n\n"
+                    f"Format rule reminder: EXACTLY {k} LINES, one query per line."
+                )
+            },
+            {"role": "user", "content": user_query},
+        ]
+    
+        # Apply chat template
+        prompt = self.tokenizer.apply_chat_template(
+            rag_request,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+    
+        # Tokenize and move to GPU
+        inputs = self.tokenizer(prompt, return_tensors="pt").to("cuda:0")
+        eos = self.tokenizer.eos_token_id
+    
+        # Generation parameters
+        gen_kwargs = {
+            **inputs,
+            "max_new_tokens": 256,  # enough for k queries
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "do_sample": True,
+            "eos_token_id": eos,
+            "pad_token_id": self.tokenizer.pad_token_id,
+        }
+    
+        # Run generation synchronously
+        output_ids = self.model.generate(**gen_kwargs)
+    
+        # Decode output skipping prompt tokens
+        generated_text = self.tokenizer.decode(
+            output_ids[0][inputs["input_ids"].shape[-1]:],
+            skip_special_tokens=True
+        )
+    
+        # Post-process: split into queries
+        queries = [q.strip() for q in generated_text.split("\n") if q.strip()]
+    
+        # Ensure exactly k results
+        return queries[:k]
+
+
     def _generate_response(self):
         
         if self.RAG_online_dark_TOR_search.isChecked():
@@ -471,17 +534,17 @@ class MainWindow(QMainWindow):
         
         elif self.RAG_online.isChecked():
             print("Using online RAG")
+            online_queries = self.generate_online_rag_queries(k = 5)
+            print("\n")
+            for q in online_queries:
+                print(q)
+            
             
         elif self.RAG_local.isChecked():
             print("Using local RAG")
-            prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
-            #Trying to use built in chat template builder, if not use the emergency one from functions
-            #try:
-                #prompt, RAG_present = Functions.native_chat_prompt_rag(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
-            #except:
-                #print("Could not use native prompt builder - Initializing emergency one from built in functions...")
-                #prompt, RAG_present = Functions.emergency_chat_prompt(self.chat_history)
-                #print("Processing prompt done!")
+            prompt, RAG_present = Functions.local_rag_chat_prompt(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
+
+
                 
         else:
             print("No RAG response")
