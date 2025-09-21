@@ -21,7 +21,7 @@ from tqdm import tqdm
 from config import RAG_EMBEDDER_PATH, RAG_CROSS_ENC_PATH, RAG_BATCH_SIZE
 import threading
 import queue
-
+import Functions
 
 
 class LocalEmbeddingFunction(embedding_functions.EmbeddingFunction):
@@ -253,63 +253,7 @@ class UniversalVectorStore:
     
     
     # --- Utility functions ---
-    def chunk_text(self, text, chunk_size=256, overlap_ratio=0.25):
-        """
-        Paragraph/sentence-aware chunking with dynamic overlap.
-        - Uses NLTK for sentence splitting
-        - Keeps paragraphs intact where possible
-        - Handles long sentences safely
-        """
-        chunks = []
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        text = re.sub(r'\n\s*\n', '\n\n', text)
-        paragraphs = re.split(r'\n{2,}', text)
-    
-        prev_sentences = []
-    
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
-    
-            sentences = nltk.sent_tokenize(para)
-    
-            # paragraph overlap
-            overlap_count = max(1, int(len(prev_sentences) * overlap_ratio)) if prev_sentences else 0
-            sentences = prev_sentences[-overlap_count:] + sentences if overlap_count else sentences
-    
-            cur_words, cur_sents = [], []
-    
-            for sent in sentences:
-                words = sent.split()
-    
-                # hard-split overlong sentences
-                if len(words) > chunk_size:
-                    if cur_words:
-                        chunks.append(" ".join(cur_words))
-                        cur_words, cur_sents = [], []
-                    for i in range(0, len(words), chunk_size):
-                        chunks.append(" ".join(words[i:i+chunk_size]))
-                    continue
-    
-                # flush if over limit
-                if len(cur_words) + len(words) > chunk_size:
-                    chunks.append(" ".join(cur_words))
-                    overlap_count_chunk = max(1, int(len(cur_sents) * overlap_ratio))
-                    cur_words = []
-                    for s in cur_sents[-overlap_count_chunk:]:
-                        cur_words.extend(s.split())
-                    cur_sents = cur_sents[-overlap_count_chunk:]
-    
-                cur_words.extend(words)
-                cur_sents.append(sent)
-    
-            if cur_words:
-                chunks.append(" ".join(cur_words))
-    
-            prev_sentences = sentences
-    
-        return chunks
+
     
     
 
@@ -359,7 +303,7 @@ class UniversalVectorStore:
         #print("Batch size: ",bs)
     
         # Step 2: chunk full_text (keeps multi-page paragraphs intact)
-        chunks = self.chunk_text(full_text, chunk_size=chunk_size, overlap_ratio = overlap_ratio)
+        chunks = Functions.chunk_text(full_text, chunk_size=chunk_size, overlap_ratio = overlap_ratio)
         chunks = [f"[Source: {pdf_name}] {c}" for c in chunks]
         
         # Step 3: assign page numbers to chunks
@@ -424,7 +368,7 @@ class UniversalVectorStore:
                     continue
                     
 
-                chunks = self.chunk_text(text, chunk_size = chunk_size, overlap_ratio = overlap_ratio)
+                chunks = Functions.chunk_text(text, chunk_size = chunk_size, overlap_ratio = overlap_ratio)
                 section_type = "content"
                 chunks = [f"[Source: {epub_name}] {c}" for c in chunks]
                 
@@ -579,7 +523,7 @@ class UniversalVectorStore:
         return (1.0 - (d ** 2) / 2.0).tolist()
 
 
-    def truncate_doc_for_reranker(self, doc_text, cross_enc_model, max_len=480):
+    def truncate_doc_for_reranker(self, doc_text, cross_enc_model, max_len=2048):
         try:
             tokenizer = cross_enc_model.tokenizer
             tokens = tokenizer(doc_text, truncation=True, max_length=max_len, return_tensors="pt")
@@ -589,7 +533,7 @@ class UniversalVectorStore:
             return doc_text[: max_len * 4]
 
 
-    def search(self, query, top_n=3, absolute_cosine_min=0.1, min_relevance=0.7):
+    def search(self, query, top_n=3, absolute_cosine_min=0.1, min_relevance=0.7, verbose = False):
         # --- Encode query ---
         query_embedding = self.embedder.encode(
             query,
@@ -619,9 +563,9 @@ class UniversalVectorStore:
             return []
 
         filtered = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_n * 15]
-
-        print("Best embedder score: ",filtered[0][1])
-        print("Best embedder paragraph:\n",filtered[0][0])
+        if verbose:
+            print("Best embedder score: ",filtered[0][1])
+            print("Best embedder paragraph:\n",filtered[0][0])
 
         rerank_pairs = []
         original_docs = []
@@ -657,7 +601,8 @@ class UniversalVectorStore:
 
         top_docs = relevant_docs[:top_n]
         _, max_rerank_sim = max(top_docs, key=lambda x: x[1])
-        print("Best rerank score: ", max_rerank_sim)
+        if verbose:
+            print("Best rerank score: ", max_rerank_sim)
         
         # --- Return top_n of relevant docs ---
         return top_docs

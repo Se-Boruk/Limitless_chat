@@ -480,6 +480,7 @@ class MainWindow(QMainWindow):
                     f"5) GREETINGS: if the input is pure small talk or a greeting (very short text of up to 3 words consisting only of common greetings like \"hi\", \"hello\", \"thanks\", \"how are you\"), output {k} lines of the exact token: __NO_SEARCH__ and nothing else.\n\n"
                     f"6) SPECULATIVE / SILLY INPUTS: if the user asks about implausible or highly speculative things, reframe them into practical, realistic, web-searchable queries (feasibility/current-state, realistic alternatives, or actionable next steps).\n\n"
                     f"7) VAGUE INPUTS: if the user is vague, include queries that clarify intent: overview, how-to, comparison, and at least one actionable next-step.\n\n"
+                    f"8) FORMAT: output should be formatted in a way, so each query has its own line and is starting by '1. ', '2. ' etc. There should be no headline, just raw {k} queries.\n\n"
                     f"Format rule reminder: EXACTLY {k} LINES, one query per line."
                 )
             },
@@ -535,9 +536,17 @@ class MainWindow(QMainWindow):
         elif self.RAG_online.isChecked():
             print("Using online RAG")
             online_queries = self.generate_online_rag_queries(k = 5)
-            print("\n")
-            for q in online_queries:
-                print(q)
+            
+            prompt, RAG_present = Functions.online_rag_chat_prompt(tokenizer = self.tokenizer,
+                                                                   queries = online_queries,
+                                                                   messages = self.chat_history,
+                                                                   vector_lib = self.Vector_lib,
+                                                                   top_n = RAG_PARAMS['top_n'],
+                                                                   min_relevance = RAG_PARAMS['min_relevance'],
+                                                                   absolute_cosine_min = RAG_PARAMS['absolute_cosine_min']
+                                                                   )
+            
+        
             
             
         elif self.RAG_local.isChecked():

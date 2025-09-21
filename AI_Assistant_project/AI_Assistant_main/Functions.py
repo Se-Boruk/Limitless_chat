@@ -1,4 +1,85 @@
+import requests
+from bs4 import BeautifulSoup
+import random
+import time
+import urllib.parse
+import re
+import nltk
+from urllib.parse import urlparse
+from torch.amp import autocast
+import torch
+import numpy as np
 
+
+try:
+    import trafilatura
+except Exception:
+    trafilatura = None
+
+try:
+    from readability import Document
+except Exception:
+    Document = None
+
+#####################################
+
+def chunk_text(text, chunk_size=256, overlap_ratio=0.25):
+    """
+    Paragraph/sentence-aware chunking with dynamic overlap.
+    - Uses NLTK for sentence splitting
+    - Keeps paragraphs intact where possible
+    - Handles long sentences safely
+    """
+    chunks = []
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    paragraphs = re.split(r'\n{2,}', text)
+
+    prev_sentences = []
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+
+        sentences = nltk.sent_tokenize(para)
+
+        # paragraph overlap
+        overlap_count = max(1, int(len(prev_sentences) * overlap_ratio)) if prev_sentences else 0
+        sentences = prev_sentences[-overlap_count:] + sentences if overlap_count else sentences
+
+        cur_words, cur_sents = [], []
+
+        for sent in sentences:
+            words = sent.split()
+
+            # hard-split overlong sentences
+            if len(words) > chunk_size:
+                if cur_words:
+                    chunks.append(" ".join(cur_words))
+                    cur_words, cur_sents = [], []
+                for i in range(0, len(words), chunk_size):
+                    chunks.append(" ".join(words[i:i+chunk_size]))
+                continue
+
+            # flush if over limit
+            if len(cur_words) + len(words) > chunk_size:
+                chunks.append(" ".join(cur_words))
+                overlap_count_chunk = max(1, int(len(cur_sents) * overlap_ratio))
+                cur_words = []
+                for s in cur_sents[-overlap_count_chunk:]:
+                    cur_words.extend(s.split())
+                cur_sents = cur_sents[-overlap_count_chunk:]
+
+            cur_words.extend(words)
+            cur_sents.append(sent)
+
+        if cur_words:
+            chunks.append(" ".join(cur_words))
+
+        prev_sentences = sentences
+
+    return chunks
 
 def emergency_chat_prompt(messages, add_generation_prompt=True) -> str:
     """
@@ -35,7 +116,8 @@ def local_rag_chat_prompt(tokenizer, messages, vector_lib, top_n=3, min_relevanc
     rag_results = vector_lib.search(query,
                                     top_n = top_n,
                                     absolute_cosine_min = absolute_cosine_min,
-                                    min_relevance = min_relevance
+                                    min_relevance = min_relevance,
+                                    verbose = True
                                     )
     
 
@@ -74,38 +156,83 @@ def local_rag_chat_prompt(tokenizer, messages, vector_lib, top_n=3, min_relevanc
     return prompt, RAG_response
 
 
-def online_rag_chat_prompt(tokenizer, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True):
+def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True):
     
-    #This one can be put later so it works in pararell and do not stop the online request
+    #Inputs for both online and offline search
     RAG_response = (False, "None")
     user_messages = [m['content'] for m in messages if m['role'] == 'user']
     
     query = user_messages[-1]
-    rag_results = vector_lib.search(query,
+
+    #Online RAG
+    #####################################################
+    #1 take and filter queries to search
+    queries_separated = []
+    for q in queries:
+        try:
+            _, q_sep = q.split(". ", 1)
+        except:
+            q_sep = q
+            
+        queries_separated.append(q_sep)
+        
+
+    #2 Send duckduckgo request
+    rag_results_online = scrape_queries_to_dict(queries_separated, max_sites_per_query=3, verbose=True)
+    
+    #3 Chunk it
+    chunk_list = []
+
+    for url, text in rag_results_online.items():
+        chunks = chunk_text(text)
+        
+        domain = urlparse(url).netloc  # extracts website domain
+        domain = domain[:200]
+        chunks = [f"[Source: {domain}] {c}" for c in chunks]
+        
+        chunk_list.extend(chunks)
+        
+    #5 Rerank the chunks found online
+    rerank_pairs = []
+    original_chunks = []
+    for c in chunk_list:
+        truncated = vector_lib.truncate_doc_for_reranker(c, vector_lib.cross_encoder)
+        rerank_pairs.append([query, truncated])
+        #In case chunk was cutted
+        original_chunks.append(c)
+        
+    with autocast(device_type='cuda', dtype=torch.float16):
+        rerank_scores = vector_lib.cross_encoder.predict(rerank_pairs, show_progress_bar=True)
+        
+    rerank_scores = np.array(rerank_scores, dtype=np.float32)
+    rerank_scores_norm = rerank_scores
+    ##########
+    # --- Zip rerank scores with original docs ---
+    reranked_docs = [(doc, float(score)) for doc, score in zip(original_chunks, rerank_scores_norm)]
+
+    # --- Filter by minimum relevance ---
+    relevant_online_chunks = [d for d in reranked_docs if d[1] >= min_relevance]
+    
+
+    #Offline RAG
+    ##################
+    relevant_offline_chunks = vector_lib.search(query,
                                     top_n = top_n,
                                     absolute_cosine_min = absolute_cosine_min,
                                     min_relevance = min_relevance
                                     )
-    
-    
-    ##################
-    #1 take queries to search
-    
-    #2 Send duckduckgo request
-    
-    #3 Take k results from each request
-    
-    #4 Chunk it
-    
-    #5 Rerank the chunks
-    
-    #6 Compare with the 
-    
-    
-    ##################
-    
 
+    rag_results = relevant_online_chunks + relevant_offline_chunks
+    
     if rag_results:
+        # --- Sort descending by reranker score ---
+        rag_results = sorted(rag_results, key=lambda x: x[1], reverse=True)
+
+        rag_results = rag_results[:top_n*2]
+        _, max_rerank_sim = max(rag_results, key=lambda x: x[1])
+        print("Best rerank score (offline + offline): ", max_rerank_sim)
+        
+
         # filter relevant
         relevant_chunks = [chunk for chunk, score in rag_results]
         if relevant_chunks:
@@ -138,6 +265,266 @@ def online_rag_chat_prompt(tokenizer, messages, vector_lib, top_n=3, min_relevan
         add_generation_prompt=True
     )
     return prompt, RAG_response
+
+#Http scrapper functions
+##################################################################################
+# ---------- small module-level helpers (defined once) ----------
+def safe_get(url, params=None, retries=3, timeout=15):
+    """GET with retries, random UA; returns (html or None, final_url)"""
+    
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "Mozilla/5.0 (X11; Linux x86_64)",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)",
+    ]
+    sess = requests.Session()
+    sess.headers.update({
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Connection": "keep-alive",
+    })
+    
+    for attempt in range(retries):
+        try:
+            sess.headers["User-Agent"] = random.choice(USER_AGENTS)
+            r = sess.get(url, params=params, timeout=timeout, allow_redirects=True)
+            if r.status_code == 200:
+                return r.text, r.url
+            if r.status_code in (429, 403):
+                time.sleep((2 ** attempt) + random.random())
+                continue
+            r.raise_for_status()
+        except Exception:
+            time.sleep((1.5 ** attempt) + random.random())
+    return None, url
+
+
+def _word_count(t: str):
+    return len(re.findall(r'\w+', t or ""))
+
+
+def _decode_ddg_href(href: str):
+    """Decode DuckDuckGo /l/?...&uddg= encoded links to real URLs"""
+    DUCK_URL = "https://duckduckgo.com/html/"
+    
+    if not href:
+        return href
+    if href.startswith("http://") or href.startswith("https://"):
+        return href
+    parsed = urllib.parse.urlparse(href)
+    qs = urllib.parse.parse_qs(parsed.query)
+    if "uddg" in qs:
+        return urllib.parse.unquote(qs["uddg"][0])
+    return urllib.parse.urljoin(DUCK_URL, href)
+
+
+def extract_main_text(html: str, min_block_words=40, top_blocks=2):
+    """
+    Heuristic extractor (prefers trafilatura/readability if available).
+    Returns cleaned main text or empty string.
+    """
+    if not html:
+        return ""
+
+    # 1) trafilatura (preferred)
+    if trafilatura is not None:
+        try:
+            t = trafilatura.extract(html, include_comments=False, include_tables=False)
+            if t and len(t.strip()) >= 50:
+                return t.strip()
+        except Exception:
+            pass
+
+    # 2) readability (next)
+    if Document is not None:
+        try:
+            doc = Document(html)
+            summary_html = doc.summary() or ""
+            if summary_html:
+                s = BeautifulSoup(summary_html, "html.parser")
+                plain = s.get_text("\n", strip=True)
+                if plain and len(plain.strip()) >= 50:
+                    return plain.strip()
+        except Exception:
+            pass
+
+    # 3) aggressive heuristic cleaning
+    soup = BeautifulSoup(html, "html.parser")
+
+    # remove common UI elements
+    selectors_to_remove = [
+        "script", "style", "noscript", "svg", "iframe", "input", "button",
+        "form", "header", "footer", "nav", "aside", "link", "meta"
+    ]
+    for sel in selectors_to_remove:
+        for node in soup.select(sel):
+            try:
+                node.decompose()
+            except Exception:
+                pass
+
+    for node in soup.select("[role=navigation], [role=complementary], [role=banner], [role=search], [role=contentinfo]"):
+        try:
+            node.decompose()
+        except Exception:
+            pass
+
+    for node in soup.select(".share, .social, .newsletter, .promo, .cookie, .advert, .ads, .breadcrumb, .sidebar, .related, .comments"):
+        try:
+            node.decompose()
+        except Exception:
+            pass
+
+    def link_density(el):
+        text = el.get_text(" ", strip=True)
+        if not text:
+            return 1.0
+        link_text = " ".join(a.get_text(" ", strip=True) for a in el.find_all("a"))
+        return float(_word_count(link_text)) / max(1, _word_count(text))
+
+    BOILERPLATE_PHRASES = [
+        "subscribe", "follow us", "share this", "newsletter", "sign up",
+        "cookie", "cookies", "privacy policy", "terms of service", "related posts",
+        "read more", "advertisement", "ads", "©", "all rights reserved", "published in",
+        "click here", "sponsored"
+    ]
+
+    def looks_like_boilerplate(text):
+        if not text:
+            return True
+        t = text.lower()
+        if _word_count(t) < 8:
+            return True
+        for p in BOILERPLATE_PHRASES:
+            if p in t:
+                return True
+        return False
+
+    candidates = []
+
+    # semantic candidates first
+    for el in soup.find_all(["article", "main"]):
+        txt = el.get_text("\n", strip=True)
+        if txt and _word_count(txt) >= min_block_words and link_density(el) < 0.6:
+            candidates.append((el, txt))
+
+    # then large div/section nodes
+    for el in soup.find_all(["section", "div"], recursive=True):
+        try:
+            txt = el.get_text(" ", strip=True)
+        except Exception:
+            continue
+        if not txt or len(txt) < 80:
+            continue
+        ld = link_density(el)
+        wc = _word_count(txt)
+        if ld > 0.45 or wc < min_block_words:
+            continue
+        candidates.append((el, txt))
+
+    if not candidates:
+        body = soup.body or soup
+        txt = body.get_text("\n", strip=True)
+        if not txt:
+            return ""
+        lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+        filtered = [ln for ln in lines if not looks_like_boilerplate(ln)]
+        return "\n\n".join(filtered).strip()
+
+    # pick top blocks by word count
+    candidates_sorted = sorted(candidates, key=lambda c: _word_count(c[1]), reverse=True)
+    top = candidates_sorted[:top_blocks]
+
+    final_blocks = []
+    for el, txt in top:
+        lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+        lines = [ln for ln in lines if not looks_like_boilerplate(ln)]
+        block_text = "\n".join(lines).strip()
+        if _word_count(block_text) >= min_block_words:
+            final_blocks.append(block_text)
+
+    if not final_blocks:
+        longest = max((c[1] for c in candidates), key=lambda t: _word_count(t), default="")
+        return longest.strip()
+
+    return "\n\n".join(final_blocks).strip()
+
+
+# ---------- main pipeline (single function, blocks separated by comments) ----------
+def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_requests=0.5,
+                           drop_empty=True, verbose=False):
+    """
+    Returns: dict {final_url: extracted_plain_text}
+    """
+    per_url = {}
+    seen = set()
+    DUCK_URL = "https://duckduckgo.com/html/"
+
+    # #############  SEARCH PHASE #############
+    if verbose:
+        print("SEARCH PHASE: running DuckDuckGo queries")
+
+    for q in queries:
+        if verbose:
+            print("[search]", q)
+        # fetch SERP HTML
+        html, _ = safe_get(DUCK_URL, params={"q": q})
+        if not html:
+            if verbose:
+                print("  search failed for:", q)
+            continue
+
+        soup = BeautifulSoup(html, "html.parser")
+        links = []
+        for a in soup.select(".result__body .result__a, .result__a")[:max_sites_per_query]:
+            href = a.get("href") or a.get("data-href") or ""
+            final = _decode_ddg_href(href)
+            if final:
+                links.append(final)
+        if not links:
+            for a in soup.select("a")[:max_sites_per_query]:
+                final = _decode_ddg_href(a.get("href") or "")
+                if final and final.startswith("http"):
+                    links.append(final)
+                    if len(links) >= max_sites_per_query:
+                        break
+
+        # #############  FETCH & EXTRACT PHASE #############
+        for link in links:
+            url_norm = (link or "").strip()
+            if not url_norm or url_norm in seen:
+                continue
+            seen.add(url_norm)
+
+            if verbose:
+                print("  fetching:", url_norm)
+
+            html_page, final_url = safe_get(url_norm)
+            text = ""
+            if html_page:
+                text = extract_main_text(html_page)
+                # second-pass if extraction tiny and redirect occurred
+                if (not text or len(text) < 50) and final_url != url_norm:
+                    html2, final_url2 = safe_get(final_url)
+                    if html2:
+                        t2 = extract_main_text(html2)
+                        if t2 and len(t2) > len(text):
+                            text = t2
+                            url_norm = final_url2
+
+            per_url[url_norm] = text or ""
+            time.sleep(sleep_between_requests + random.random() * 0.4)
+
+    # #############  FINALIZE #############
+    if drop_empty:
+        per_url = {u: t for u, t in per_url.items() if t and len(t) >= 20}
+
+    return per_url
+##################################################################################
+
+
+
 
 
 
