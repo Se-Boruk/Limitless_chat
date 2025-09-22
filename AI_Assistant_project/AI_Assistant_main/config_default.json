@@ -1,0 +1,17 @@
+{
+    "generation": {
+        "max_new_tokens": 512,
+        "repetition_penalty": 1.3,
+        "no_repeat_ngram_size": 5,
+        "use_cache": true
+    },
+    "rag": {
+        "use_RAG": true,
+        "top_n": 3,
+        "min_relevance": 0.75,
+        "absolute_cosine_min": 0.1,
+        "chunk_size": 256,
+        "overlap_ratio": 0.25,
+        "RAG_batch_size": 8
+    }
+}

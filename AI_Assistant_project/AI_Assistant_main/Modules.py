@@ -18,11 +18,18 @@ import nltk
 from transformers import AutoModel, AutoTokenizer
 from sentence_transformers import models
 from tqdm import tqdm
-from config import RAG_EMBEDDER_PATH, RAG_CROSS_ENC_PATH, RAG_BATCH_SIZE
+from dir_config import RAG_EMBEDDER_PATH, RAG_CROSS_ENC_PATH 
 import threading
 import queue
 import Functions
+import json
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+with open(CONFIG_PATH, "r") as f:
+    CONFIG = json.load(f)
+
+RAG_BATCH_SIZE = CONFIG["rag_params"]["RAG_batch_size"]
 
 class LocalEmbeddingFunction(embedding_functions.EmbeddingFunction):
     def __init__(self, st_model):

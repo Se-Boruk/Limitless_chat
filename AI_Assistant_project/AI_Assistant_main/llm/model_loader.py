@@ -2,7 +2,7 @@
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-from config import INIT_PROMPT_FILE  # Absolute import works in direct execution
+from dir_config import INIT_PROMPT_FILE  # Absolute import works in direct execution
 import gc
 
 class LocalLLM:
