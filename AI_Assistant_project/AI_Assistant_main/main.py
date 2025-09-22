@@ -532,10 +532,21 @@ class MainWindow(QMainWindow):
         
         elif self.RAG_online_TOR_search.isChecked():
             print("Using TOR RAG")
+            online_queries = self.generate_online_rag_queries(k = 6)
+            prompt, RAG_present = Functions.online_rag_chat_prompt(tokenizer = self.tokenizer,
+                                                                   queries = online_queries,
+                                                                   messages = self.chat_history,
+                                                                   vector_lib = self.Vector_lib,
+                                                                   top_n = RAG_PARAMS['top_n'],
+                                                                   min_relevance = RAG_PARAMS['min_relevance'],
+                                                                   absolute_cosine_min = RAG_PARAMS['absolute_cosine_min'],
+                                                                   add_generation_prompt=True,
+                                                                   TOR_search = True
+                                                                   )
         
         elif self.RAG_online.isChecked():
             print("Using online RAG")
-            online_queries = self.generate_online_rag_queries(k = 5)
+            online_queries = self.generate_online_rag_queries(k = 6)
             
             prompt, RAG_present = Functions.online_rag_chat_prompt(tokenizer = self.tokenizer,
                                                                    queries = online_queries,
@@ -543,7 +554,9 @@ class MainWindow(QMainWindow):
                                                                    vector_lib = self.Vector_lib,
                                                                    top_n = RAG_PARAMS['top_n'],
                                                                    min_relevance = RAG_PARAMS['min_relevance'],
-                                                                   absolute_cosine_min = RAG_PARAMS['absolute_cosine_min']
+                                                                   absolute_cosine_min = RAG_PARAMS['absolute_cosine_min'],
+                                                                   add_generation_prompt=True,
+                                                                   TOR_search = False
                                                                    )
             
         

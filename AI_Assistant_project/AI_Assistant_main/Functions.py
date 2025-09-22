@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from torch.amp import autocast
 import torch
 import numpy as np
-
+from stem.process import launch_tor_with_config
 
 try:
     import trafilatura
@@ -156,7 +156,7 @@ def local_rag_chat_prompt(tokenizer, messages, vector_lib, top_n=3, min_relevanc
     return prompt, RAG_response
 
 
-def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True):
+def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True, TOR_search = False):
     
     #Inputs for both online and offline search
     RAG_response = (False, "None")
@@ -178,7 +178,7 @@ def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, mi
         
 
     #2 Send duckduckgo request
-    rag_results_online = scrape_queries_to_dict(queries_separated, max_sites_per_query=3, verbose=True)
+    rag_results_online = scrape_queries_to_dict(queries_separated, max_sites_per_query=2, verbose=True, tor = TOR_search)
     
     #3 Chunk it
     chunk_list = []
@@ -230,7 +230,7 @@ def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, mi
 
         rag_results = rag_results[:top_n*2]
         _, max_rerank_sim = max(rag_results, key=lambda x: x[1])
-        print("Best rerank score (offline + offline): ", max_rerank_sim)
+        print("Best rerank score (offline + online): ", max_rerank_sim)
         
 
         # filter relevant
@@ -269,7 +269,7 @@ def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, mi
 #Http scrapper functions
 ##################################################################################
 # ---------- small module-level helpers (defined once) ----------
-def safe_get(url, params=None, retries=3, timeout=15):
+def safe_get(url, params=None, retries=5, timeout=15):
     """GET with retries, random UA; returns (html or None, final_url)"""
     
     USER_AGENTS = [
@@ -292,6 +292,68 @@ def safe_get(url, params=None, retries=3, timeout=15):
             if r.status_code == 200:
                 return r.text, r.url
             if r.status_code in (429, 403):
+                time.sleep((2 ** attempt) + random.random())
+                continue
+            r.raise_for_status()
+        except Exception:
+            time.sleep((1.5 ** attempt) + random.random())
+    return None, url
+
+
+#get Tor users
+def get_tor_user_agents():
+    """Fetch user agents from online source or fallback to local list"""
+    try:
+        resp = requests.get("https://useragents.io/random?limit=100", timeout=10)
+        resp.raise_for_status()
+        user_agents = resp.json()
+        return [ua['user_agent'] for ua in user_agents if 'user_agent' in ua]
+    except Exception:
+        # fallback local list
+        return [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:89.0) Gecko/20100101 Firefox/89.0",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0",
+            "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:54.0) Gecko/20100101 Firefox/54.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edge/18.18363",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/88.0.4324.96 Safari/537.36",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1",
+            # ... add more entries to reach 30+
+        ]
+
+# ---------- Tor-safe GET ----------
+def safe_get_tor(url, params=None, retries=5, timeout=15):
+    """GET through Tor with retries, random UA; returns (html or None, final_url)"""
+    USER_AGENTS = get_tor_user_agents()
+    sess = requests.Session()
+    sess.headers.update({
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Connection": "keep-alive",
+    })
+    proxies = {
+        "https": "socks5h://127.0.0.1:9050"
+    }
+
+    for attempt in range(retries):
+        if not USER_AGENTS:
+            USER_AGENTS = get_tor_user_agents()  # refresh if exhausted
+        ua = random.choice(USER_AGENTS)
+        USER_AGENTS.remove(ua)  # ensure each UA used only once per session
+        sess.headers["User-Agent"] = ua
+
+        try:
+            r = sess.get(url, params=params, timeout=timeout,
+                         allow_redirects=True, proxies=proxies)
+            if r.status_code == 200:
+                return r.text, r.url
+            if r.status_code in (403, 429):
                 time.sleep((2 ** attempt) + random.random())
                 continue
             r.raise_for_status()
@@ -453,13 +515,24 @@ def extract_main_text(html: str, min_block_words=40, top_blocks=2):
 
 # ---------- main pipeline (single function, blocks separated by comments) ----------
 def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_requests=0.5,
-                           drop_empty=True, verbose=False):
+                           drop_empty=True, verbose=False, tor=False):
     """
     Returns: dict {final_url: extracted_plain_text}
+    If tor=True, launches Tor automatically via stem.
     """
     per_url = {}
     seen = set()
     DUCK_URL = "https://duckduckgo.com/html/"
+
+    tor_process = None
+    if tor:
+        print("[TOR] Launching Tor process...")
+        tor_process = launch_tor_with_config(
+            config={'SocksPort': '9050'},
+            tor_cmd="C:\\Programy\\Tor\\tor\\tor.exe"
+        )
+        print("[TOR] Tor running on 127.0.0.1:9050")
+
 
     # #############  SEARCH PHASE #############
     if verbose:
@@ -469,7 +542,11 @@ def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_request
         if verbose:
             print("[search]", q)
         # fetch SERP HTML
-        html, _ = safe_get(DUCK_URL, params={"q": q})
+        if tor:
+            html, _ = safe_get_tor(DUCK_URL, params={"q": q})
+        else:
+            html, _ = safe_get(DUCK_URL, params={"q": q})
+
         if not html:
             if verbose:
                 print("  search failed for:", q)
@@ -499,14 +576,21 @@ def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_request
 
             if verbose:
                 print("  fetching:", url_norm)
+            if tor:
+                html_page, final_url = safe_get_tor(url_norm)
+            else:
+                html_page, final_url = safe_get(url_norm)
 
-            html_page, final_url = safe_get(url_norm)
             text = ""
             if html_page:
                 text = extract_main_text(html_page)
                 # second-pass if extraction tiny and redirect occurred
                 if (not text or len(text) < 50) and final_url != url_norm:
-                    html2, final_url2 = safe_get(final_url)
+                    if tor:
+                        html2, final_url2 = safe_get_tor(final_url)
+                    else:
+                        html2, final_url2 = safe_get(final_url)
+
                     if html2:
                         t2 = extract_main_text(html2)
                         if t2 and len(t2) > len(text):
@@ -519,6 +603,11 @@ def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_request
     # #############  FINALIZE #############
     if drop_empty:
         per_url = {u: t for u, t in per_url.items() if t and len(t) >= 20}
+
+    if tor and tor_process:
+        print("[TOR] Shutting down Tor process...")
+        tor_process.kill()
+        print("[TOR] Tor stopped.")
 
     return per_url
 ##################################################################################
