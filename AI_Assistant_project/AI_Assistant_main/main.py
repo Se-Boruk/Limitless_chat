@@ -520,8 +520,20 @@ class MainWindow(QMainWindow):
         other_layout.setContentsMargins(10, 20, 10, 10)
         other_layout.setSpacing(8)
         
-        #############
+        ############
+        # Add True/False switch
+        self.TOR_on_start = QCheckBox("Launch TOR on start")
+        self.TOR_on_start.setChecked(bool(self.CONFIG['other'].get("launch_tor_on_start", True)))  # default = False
 
+        # Function that runs when toggled
+        def on_switch_toggled(state):
+            # Update config dict (or object) directly
+            self.CONFIG["other"]["launch_tor_on_start"] = bool(state)
+        
+        self.TOR_on_start.toggled.connect(on_switch_toggled)
+        
+        other_layout.addRow("", self.TOR_on_start)
+        
         #############
         
         other_group.setLayout(other_layout)
@@ -614,10 +626,15 @@ class MainWindow(QMainWindow):
                         "overlap_ratio": self.overlap_ratio_slider.value() / 100,
                         "RAG_batch_size": int(self.rag_batch_size.currentText())
                          } 
+        
+        other =         {
+                        "launch_tor_on_start": bool(self.CONFIG['other'].get("launch_tor_on_start", True))
+                        }
 
         self.CONFIG = {
                   "generation_params": gen_params,
-                  "rag_params": rag_params
+                  "rag_params": rag_params,
+                  "other": other
                   }
 
         #Update Vector_lib params
@@ -664,6 +681,8 @@ class MainWindow(QMainWindow):
         self.overlap_ratio_slider.setValue(int(self.CONFIG['rag_params']['overlap_ratio']*100))
         self.rag_batch_size.setCurrentText(str(self.CONFIG['rag_params'].get("RAG_batch_size", self.CONFIG['rag_params']['RAG_batch_size'])))
 
+        #Other
+        self.TOR_on_start.setChecked(bool(self.CONFIG['other'].get("launch_tor_on_start", True)))
             
 
 
