@@ -25,14 +25,12 @@ import Functions
 from dir_config import BOT_NAME, BOT_DEV_NAME
 from dir_config import MODEL_DIR, DOC_LIB_DIR, VECTOR_LIB_DIR
 
-from PySide6.QtGui import QIntValidator
-from PySide6.QtWidgets import QApplication, QMainWindow, QToolBar, QSplitter, QWidget, QVBoxLayout, QLabel, QSpinBox
-
 import json
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+DEF_CONFIG_PATH = os.path.join(BASE_DIR, "config_default.json")
 with open(CONFIG_PATH, "r") as f:
     CONFIG = json.load(f)
 
@@ -276,6 +274,24 @@ class MainWindow(QMainWindow):
         params_layout.setContentsMargins(10, 20, 10, 10)
         params_layout.setSpacing(8)
         
+        
+        #########################
+        # Max tokens as a dropdown
+        self.max_tokens_input = QComboBox()
+        self.max_tokens_input.setEditable(False)  # user cannot type
+        self.max_tokens_input.setMaximumHeight(25)
+        
+        # Add predefined options
+        token_values = [64, 128, 256, 512, 786, 1024, 1536, 2048, 3072, 4096]
+        for val in token_values:
+            self.max_tokens_input.addItem(str(val))
+        
+        # Set default value
+        self.max_tokens_input.setCurrentText(str(GENERATION_PARAMS.get("max_new_tokens", GENERATION_PARAMS['max_new_tokens'])))
+        # Add to layout
+        params_layout.addRow("Max gen. tokens:", self.max_tokens_input)
+        #########################
+        
         # Temperature
         self.temp_slider = QSlider(Qt.Horizontal)
         self.temp_slider.setRange(0, 100)
@@ -308,7 +324,7 @@ class MainWindow(QMainWindow):
         self.rep_penalty_slider.valueChanged.connect(lambda v: self.rep_penalty_label.setText(f"{v/100:.2f}"))
         params_layout.addRow("Repetition penalty:", self.rep_penalty_slider)
         params_layout.addRow("", self.rep_penalty_label)
-        
+
         # No repeat ngram
         self.no_rep_ngram_slider = QSlider(Qt.Horizontal)
         self.no_rep_ngram_slider.setRange(0, 1000)
@@ -321,23 +337,6 @@ class MainWindow(QMainWindow):
         params_layout.addRow("", self.no_rep_ngram_label)
         
 
-        #########################
-        # Max tokens as a dropdown
-        self.max_tokens_input = QComboBox()
-        self.max_tokens_input.setEditable(False)  # user cannot type
-        self.max_tokens_input.setMaximumHeight(25)
-        
-        # Add predefined options
-        token_values = [64, 128, 256, 512, 786, 1024, 1536, 2048, 3072, 4096]
-        for val in token_values:
-            self.max_tokens_input.addItem(str(val))
-        
-        # Set default value
-        self.max_tokens_input.setCurrentText(str(GENERATION_PARAMS.get("max_new_tokens", GENERATION_PARAMS['max_new_tokens'])))
-        # Add to layout
-        params_layout.addRow("Max gen. tokens:", self.max_tokens_input)
-        #########################
-        
         params_group.setLayout(params_layout)
         left_layout.addWidget(params_group)
         
@@ -359,6 +358,64 @@ class MainWindow(QMainWindow):
         rag_layout = QFormLayout()
         rag_layout.setContentsMargins(10, 20, 10, 10)
         rag_layout.setSpacing(8)
+        
+        
+        #rag max gen tokens
+        ####################
+        self.rag_max_tokens = QComboBox()
+        self.rag_max_tokens.setEditable(False)  # user cannot type
+        self.rag_max_tokens.setMaximumHeight(25)
+        
+        # Add predefined options
+        rag_max_token_values = [64, 128, 256, 384, 512]
+        for val in rag_max_token_values:
+            self.rag_max_tokens.addItem(str(val))
+        
+        # Set default value
+        self.rag_max_tokens.setCurrentText(str(RAG_PARAMS.get("RAG_max_new_tokens", RAG_PARAMS['RAG_max_new_tokens'])))
+        # Add to layout
+        rag_layout.addRow("RAG max gen. tokens:", self.rag_max_tokens)
+        ####################
+        
+        # rag Temperature
+        self.rag_temp_slider = QSlider(Qt.Horizontal)
+        self.rag_temp_slider.setRange(0, 100)
+        self.rag_temp_slider.setValue(int(RAG_PARAMS['RAG_temperature']*100))
+        self.rag_temp_label = QLineEdit(str(RAG_PARAMS['RAG_temperature']))
+        self.rag_temp_label.setReadOnly(True)
+        self.rag_temp_label.setMaximumHeight(25)
+        self.rag_temp_slider.valueChanged.connect(lambda v: self.rag_temp_label.setText(f"{v/100:.2f}"))
+        rag_layout.addRow("RAG Temperature:", self.rag_temp_slider)
+        rag_layout.addRow("", self.rag_temp_label)
+        
+        # rag Top P
+        self.rag_top_p_slider = QSlider(Qt.Horizontal)
+        self.rag_top_p_slider.setRange(0, 100)
+        self.rag_top_p_slider.setValue(int(RAG_PARAMS['RAG_top_p']*100))
+        self.rag_top_p_label = QLineEdit(str(RAG_PARAMS['RAG_top_p']))
+        self.rag_top_p_label.setReadOnly(True)
+        self.rag_top_p_label.setMaximumHeight(25)
+        self.rag_top_p_slider.valueChanged.connect(lambda v: self.rag_top_p_label.setText(f"{v/100:.2f}"))
+        rag_layout.addRow("RAG Top P:", self.top_p_slider)
+        rag_layout.addRow("", self.rag_top_p_label)
+        
+        #rag top n
+        ####################
+        self.top_n = QComboBox()
+        self.top_n.setEditable(False)  # user cannot type
+        self.top_n.setMaximumHeight(25)
+        
+        # Add predefined options
+        n_values = [1,2,3,4,6,8,10,12]
+        for val in n_values:
+            self.top_n.addItem(str(val))
+        
+        # Set default value
+        self.top_n.setCurrentText(str(RAG_PARAMS.get("top_n", RAG_PARAMS['top_n'])))
+        # Add to layout
+        rag_layout.addRow("Top n:", self.top_n)
+        ####################
+        
         
         ############
         # min_relevance
@@ -383,19 +440,9 @@ class MainWindow(QMainWindow):
         rag_layout.addRow("absolute cosine min:", self.absolute_cos_min_slider)
         rag_layout.addRow("", self.absolute_cos_min_label)
         
-        # overlap ratio
-        self.overlap_ratio_slider = QSlider(Qt.Horizontal)
-        self.overlap_ratio_slider.setRange(0, 100)
-        self.overlap_ratio_slider.setValue(int(RAG_PARAMS['overlap_ratio']*100))
-        self.overlap_ratio_label = QLineEdit(str(RAG_PARAMS['overlap_ratio']))
-        self.overlap_ratio_label.setReadOnly(True)
-        self.overlap_ratio_label.setMaximumHeight(25)
-        self.overlap_ratio_slider.valueChanged.connect(lambda v: self.overlap_ratio_label.setText(f"{v/100:.2f}"))
-        rag_layout.addRow("Overlap ratio:", self.overlap_ratio_slider)
-        rag_layout.addRow("", self.overlap_ratio_label)
-        
         
         # chunk size for embedder
+        ####################
         self.chunk_size = QComboBox()
         self.chunk_size.setEditable(False)  # user cannot type
         self.chunk_size.setMaximumHeight(25)
@@ -409,9 +456,23 @@ class MainWindow(QMainWindow):
         self.chunk_size.setCurrentText(str(RAG_PARAMS.get("chunk_size", RAG_PARAMS['chunk_size'])))
         # Add to layout
         rag_layout.addRow("Chunk_size (embedding):", self.chunk_size)
+        ####################
+        
+        
+        # overlap ratio
+        self.overlap_ratio_slider = QSlider(Qt.Horizontal)
+        self.overlap_ratio_slider.setRange(0, 100)
+        self.overlap_ratio_slider.setValue(int(RAG_PARAMS['overlap_ratio']*100))
+        self.overlap_ratio_label = QLineEdit(str(RAG_PARAMS['overlap_ratio']))
+        self.overlap_ratio_label.setReadOnly(True)
+        self.overlap_ratio_label.setMaximumHeight(25)
+        self.overlap_ratio_slider.valueChanged.connect(lambda v: self.overlap_ratio_label.setText(f"{v/100:.2f}"))
+        rag_layout.addRow("Overlap ratio:", self.overlap_ratio_slider)
+        rag_layout.addRow("", self.overlap_ratio_label)
         
         
         #rag batch size
+        ####################
         self.rag_batch_size = QComboBox()
         self.rag_batch_size.setEditable(False)  # user cannot type
         self.rag_batch_size.setMaximumHeight(25)
@@ -425,22 +486,9 @@ class MainWindow(QMainWindow):
         self.rag_batch_size.setCurrentText(str(RAG_PARAMS.get("RAG_batch_size", RAG_PARAMS['RAG_batch_size'])))
         # Add to layout
         rag_layout.addRow("RAG batch size:", self.rag_batch_size)
+        ####################
         
-        #rag batch size
-        self.top_n = QComboBox()
-        self.top_n.setEditable(False)  # user cannot type
-        self.top_n.setMaximumHeight(25)
-        
-        # Add predefined options
-        n_values = [1,2,3,4,6,8,10,12]
-        for val in n_values:
-            self.top_n.addItem(str(val))
-        
-        # Set default value
-        self.top_n.setCurrentText(str(RAG_PARAMS.get("top_n", RAG_PARAMS['top_n'])))
-        # Add to layout
-        rag_layout.addRow("Top n:", self.top_n)
-        
+
         
         
         #############
@@ -498,7 +546,16 @@ class MainWindow(QMainWindow):
         # Save button
         save_btn = QPushButton("Save Settings")
         save_btn.setMaximumWidth(150)
-        save_btn.clicked.connect(self.save_settings)  # connect to your save function
+        
+        def save_and_notify():
+            self.save_settings()  # your existing function that writes config
+            QMessageBox.information(
+                self,
+                "Settings Saved",
+                "Some options may require restarting the application to take effect."
+            )
+        
+        save_btn.clicked.connect(save_and_notify)
         buttons_layout.addWidget(save_btn)
         
         # Load defaults button
@@ -534,10 +591,45 @@ class MainWindow(QMainWindow):
 
      
     def save_settings(self):
-        print("Saved")
+        gen_params =   {
+                        "temperature" : self.temp_slider.value() / 100,
+                    	"top_p": self.top_p_slider.value() / 100,
+                        "max_new_tokens": int(self.max_tokens_input.currentText()),
+                        "repetition_penalty": self.rep_penalty_slider.value() / 100,
+                        "no_repeat_ngram_size": self.no_rep_ngram_slider.value() / 100,
+                        "use_cache": True
+                        }
+        
+        rag_params =   {
+                        "RAG_max_new_tokens": int(self.rag_max_tokens.currentText()),
+                        "RAG_temperature": self.rag_temp_slider.value() / 100,
+                        "RAG_top_p": self.rag_top_p_slider.value() / 100,
+                        "top_n": int(self.top_n.currentText()),
+                        "min_relevance": self.min_relevance_slider.value() / 100,
+                        "absolute_cosine_min": self.absolute_cos_min_slider.value() / 100,
+                        "chunk_size": int(self.chunk_size.currentText()),
+                        "overlap_ratio": self.overlap_ratio_slider.value() / 100,
+                        "RAG_batch_size": int(self.rag_batch_size.currentText())
+                         } 
 
+        config = {
+                  "generation_params": gen_params,
+                  "rag_params": rag_params
+                  }
+
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=4)
+        
+        
     def load_default_settings(self):
-        print("Loaded default")
+        print("Loading default settings")
+        with open(DEF_CONFIG_PATH, "r") as f:
+            CONFIG = json.load(f)
+            
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(CONFIG, f, indent=4)
+            
+
 
 
         
@@ -806,9 +898,9 @@ class MainWindow(QMainWindow):
         # Generation parameters
         gen_kwargs = {
             **inputs,
-            "max_new_tokens": 256,  #enough for k queries
-            "temperature": self.temp_slider.value() / 100,
-            "top_p": self.top_p_slider.value() / 100,
+            "max_new_tokens": int(self.rag_max_tokens.currentText()),
+            "temperature": self.rag_temp_slider.value() / 100,
+            "top_p": self.rag_top_p_slider.value() / 100,
             "do_sample": True,
             "eos_token_id": eos,
             "pad_token_id": self.tokenizer.pad_token_id,
