@@ -29,13 +29,10 @@ import json
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DEF_CONFIG_PATH = os.path.join(BASE_DIR, "config_default.json")
-with open(CONFIG_PATH, "r") as f:
-    CONFIG = json.load(f)
 
-GENERATION_PARAMS = CONFIG["generation_params"]
-RAG_PARAMS = CONFIG["rag_params"]
 
 
 
@@ -102,6 +99,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(BOT_DEV_NAME)
         self.resize(1200, 700)
         self._apply_theme()
+        
+        #Loading config data
+        with open(CONFIG_PATH, "r") as f:
+            self.CONFIG = json.load(f)
     
         self.llm = LocalLLM()
         self.model = None
@@ -110,7 +111,9 @@ class MainWindow(QMainWindow):
     
         self.Vector_lib = Modules.UniversalVectorStore(
             DOC_LIB_DIR, VECTOR_LIB_DIR,
-            RAG_PARAMS['chunk_size'], RAG_PARAMS['overlap_ratio']
+            self.CONFIG['rag_params']['chunk_size'],
+            self.CONFIG['rag_params']['overlap_ratio'],
+            self.CONFIG['rag_params']["RAG_batch_size"]
         )
         self.Vector_lib.load_model_fp32()
         #self.Vector_lib.load_model_fp16() # optional
@@ -287,7 +290,7 @@ class MainWindow(QMainWindow):
             self.max_tokens_input.addItem(str(val))
         
         # Set default value
-        self.max_tokens_input.setCurrentText(str(GENERATION_PARAMS.get("max_new_tokens", GENERATION_PARAMS['max_new_tokens'])))
+        self.max_tokens_input.setCurrentText(str(self.CONFIG['generation_params'].get("max_new_tokens", self.CONFIG['generation_params']['max_new_tokens'])))
         # Add to layout
         params_layout.addRow("Max gen. tokens:", self.max_tokens_input)
         #########################
@@ -295,8 +298,8 @@ class MainWindow(QMainWindow):
         # Temperature
         self.temp_slider = QSlider(Qt.Horizontal)
         self.temp_slider.setRange(0, 100)
-        self.temp_slider.setValue(int(GENERATION_PARAMS['temperature']*100))
-        self.temp_label = QLineEdit(str(GENERATION_PARAMS['temperature']))
+        self.temp_slider.setValue(int(self.CONFIG['generation_params']['temperature']*100))
+        self.temp_label = QLineEdit(str(self.CONFIG['generation_params']['temperature']))
         self.temp_label.setReadOnly(True)
         self.temp_label.setMaximumHeight(25)
         self.temp_slider.valueChanged.connect(lambda v: self.temp_label.setText(f"{v/100:.2f}"))
@@ -306,8 +309,8 @@ class MainWindow(QMainWindow):
         # Top P
         self.top_p_slider = QSlider(Qt.Horizontal)
         self.top_p_slider.setRange(0, 100)
-        self.top_p_slider.setValue(int(GENERATION_PARAMS['top_p']*100))
-        self.top_p_label = QLineEdit(str(GENERATION_PARAMS['top_p']))
+        self.top_p_slider.setValue(int(self.CONFIG['generation_params']['top_p']*100))
+        self.top_p_label = QLineEdit(str(self.CONFIG['generation_params']['top_p']))
         self.top_p_label.setReadOnly(True)
         self.top_p_label.setMaximumHeight(25)
         self.top_p_slider.valueChanged.connect(lambda v: self.top_p_label.setText(f"{v/100:.2f}"))
@@ -317,8 +320,8 @@ class MainWindow(QMainWindow):
         # Rep penalty
         self.rep_penalty_slider = QSlider(Qt.Horizontal)
         self.rep_penalty_slider.setRange(100, 200)
-        self.rep_penalty_slider.setValue(int(GENERATION_PARAMS['repetition_penalty']*100))
-        self.rep_penalty_label = QLineEdit(str(GENERATION_PARAMS['repetition_penalty']))
+        self.rep_penalty_slider.setValue(int(self.CONFIG['generation_params']['repetition_penalty']*100))
+        self.rep_penalty_label = QLineEdit(str(self.CONFIG['generation_params']['repetition_penalty']))
         self.rep_penalty_label.setReadOnly(True)
         self.rep_penalty_label.setMaximumHeight(25)
         self.rep_penalty_slider.valueChanged.connect(lambda v: self.rep_penalty_label.setText(f"{v/100:.2f}"))
@@ -327,12 +330,12 @@ class MainWindow(QMainWindow):
 
         # No repeat ngram
         self.no_rep_ngram_slider = QSlider(Qt.Horizontal)
-        self.no_rep_ngram_slider.setRange(0, 1000)
-        self.no_rep_ngram_slider.setValue(int(GENERATION_PARAMS['no_repeat_ngram_size']*100))
-        self.no_rep_ngram_label = QLineEdit(str(GENERATION_PARAMS['no_repeat_ngram_size']))
+        self.no_rep_ngram_slider.setRange(0, 10)
+        self.no_rep_ngram_slider.setValue(int(self.CONFIG['generation_params']['no_repeat_ngram_size']))
+        self.no_rep_ngram_label = QLineEdit(str(self.CONFIG['generation_params']['no_repeat_ngram_size']))
         self.no_rep_ngram_label.setReadOnly(True)
         self.no_rep_ngram_label.setMaximumHeight(25)
-        self.no_rep_ngram_slider.valueChanged.connect(lambda v: self.no_rep_ngram_label.setText(f"{v/100:.2f}"))
+        self.no_rep_ngram_slider.valueChanged.connect(lambda v: self.no_rep_ngram_label.setText(f"{v}"))
         params_layout.addRow("No rep. ngram size:", self.no_rep_ngram_slider)
         params_layout.addRow("", self.no_rep_ngram_label)
         
@@ -372,7 +375,7 @@ class MainWindow(QMainWindow):
             self.rag_max_tokens.addItem(str(val))
         
         # Set default value
-        self.rag_max_tokens.setCurrentText(str(RAG_PARAMS.get("RAG_max_new_tokens", RAG_PARAMS['RAG_max_new_tokens'])))
+        self.rag_max_tokens.setCurrentText(str(self.CONFIG['rag_params'].get("RAG_max_new_tokens", self.CONFIG['rag_params']['RAG_max_new_tokens'])))
         # Add to layout
         rag_layout.addRow("RAG max gen. tokens:", self.rag_max_tokens)
         ####################
@@ -380,8 +383,8 @@ class MainWindow(QMainWindow):
         # rag Temperature
         self.rag_temp_slider = QSlider(Qt.Horizontal)
         self.rag_temp_slider.setRange(0, 100)
-        self.rag_temp_slider.setValue(int(RAG_PARAMS['RAG_temperature']*100))
-        self.rag_temp_label = QLineEdit(str(RAG_PARAMS['RAG_temperature']))
+        self.rag_temp_slider.setValue(int(self.CONFIG['rag_params']['RAG_temperature']*100))
+        self.rag_temp_label = QLineEdit(str(self.CONFIG['rag_params']['RAG_temperature']))
         self.rag_temp_label.setReadOnly(True)
         self.rag_temp_label.setMaximumHeight(25)
         self.rag_temp_slider.valueChanged.connect(lambda v: self.rag_temp_label.setText(f"{v/100:.2f}"))
@@ -391,12 +394,12 @@ class MainWindow(QMainWindow):
         # rag Top P
         self.rag_top_p_slider = QSlider(Qt.Horizontal)
         self.rag_top_p_slider.setRange(0, 100)
-        self.rag_top_p_slider.setValue(int(RAG_PARAMS['RAG_top_p']*100))
-        self.rag_top_p_label = QLineEdit(str(RAG_PARAMS['RAG_top_p']))
+        self.rag_top_p_slider.setValue(int(self.CONFIG['rag_params']['RAG_top_p']*100))
+        self.rag_top_p_label = QLineEdit(str(self.CONFIG['rag_params']['RAG_top_p']))
         self.rag_top_p_label.setReadOnly(True)
         self.rag_top_p_label.setMaximumHeight(25)
         self.rag_top_p_slider.valueChanged.connect(lambda v: self.rag_top_p_label.setText(f"{v/100:.2f}"))
-        rag_layout.addRow("RAG Top P:", self.top_p_slider)
+        rag_layout.addRow("RAG Top P:", self.rag_top_p_slider)
         rag_layout.addRow("", self.rag_top_p_label)
         
         #rag top n
@@ -411,7 +414,7 @@ class MainWindow(QMainWindow):
             self.top_n.addItem(str(val))
         
         # Set default value
-        self.top_n.setCurrentText(str(RAG_PARAMS.get("top_n", RAG_PARAMS['top_n'])))
+        self.top_n.setCurrentText(str(self.CONFIG['rag_params'].get("top_n", self.CONFIG['rag_params']['top_n'])))
         # Add to layout
         rag_layout.addRow("Top n:", self.top_n)
         ####################
@@ -421,8 +424,8 @@ class MainWindow(QMainWindow):
         # min_relevance
         self.min_relevance_slider = QSlider(Qt.Horizontal)
         self.min_relevance_slider.setRange(0, 100)
-        self.min_relevance_slider.setValue(int(RAG_PARAMS['min_relevance']*100))
-        self.min_relevance_label = QLineEdit(str(RAG_PARAMS['min_relevance']))
+        self.min_relevance_slider.setValue(int(self.CONFIG['rag_params']['min_relevance']*100))
+        self.min_relevance_label = QLineEdit(str(self.CONFIG['rag_params']['min_relevance']))
         self.min_relevance_label.setReadOnly(True)
         self.min_relevance_label.setMaximumHeight(25)
         self.min_relevance_slider.valueChanged.connect(lambda v: self.min_relevance_label.setText(f"{v/100:.2f}"))
@@ -432,8 +435,8 @@ class MainWindow(QMainWindow):
         # absolute cosine min
         self.absolute_cos_min_slider = QSlider(Qt.Horizontal)
         self.absolute_cos_min_slider.setRange(0, 100)
-        self.absolute_cos_min_slider.setValue(int(RAG_PARAMS['absolute_cosine_min']*100))
-        self.absolute_cos_min_label = QLineEdit(str(RAG_PARAMS['absolute_cosine_min']))
+        self.absolute_cos_min_slider.setValue(int(self.CONFIG['rag_params']['absolute_cosine_min']*100))
+        self.absolute_cos_min_label = QLineEdit(str(self.CONFIG['rag_params']['absolute_cosine_min']))
         self.absolute_cos_min_label.setReadOnly(True)
         self.absolute_cos_min_label.setMaximumHeight(25)
         self.absolute_cos_min_slider.valueChanged.connect(lambda v: self.absolute_cos_min_label.setText(f"{v/100:.2f}"))
@@ -453,7 +456,7 @@ class MainWindow(QMainWindow):
             self.chunk_size.addItem(str(val))
         
         # Set default value
-        self.chunk_size.setCurrentText(str(RAG_PARAMS.get("chunk_size", RAG_PARAMS['chunk_size'])))
+        self.chunk_size.setCurrentText(str(self.CONFIG['rag_params'].get("chunk_size", self.CONFIG['rag_params']['chunk_size'])))
         # Add to layout
         rag_layout.addRow("Chunk_size (embedding):", self.chunk_size)
         ####################
@@ -462,8 +465,8 @@ class MainWindow(QMainWindow):
         # overlap ratio
         self.overlap_ratio_slider = QSlider(Qt.Horizontal)
         self.overlap_ratio_slider.setRange(0, 100)
-        self.overlap_ratio_slider.setValue(int(RAG_PARAMS['overlap_ratio']*100))
-        self.overlap_ratio_label = QLineEdit(str(RAG_PARAMS['overlap_ratio']))
+        self.overlap_ratio_slider.setValue(int(self.CONFIG['rag_params']['overlap_ratio']*100))
+        self.overlap_ratio_label = QLineEdit(str(self.CONFIG['rag_params']['overlap_ratio']))
         self.overlap_ratio_label.setReadOnly(True)
         self.overlap_ratio_label.setMaximumHeight(25)
         self.overlap_ratio_slider.valueChanged.connect(lambda v: self.overlap_ratio_label.setText(f"{v/100:.2f}"))
@@ -483,7 +486,7 @@ class MainWindow(QMainWindow):
             self.rag_batch_size.addItem(str(val))
         
         # Set default value
-        self.rag_batch_size.setCurrentText(str(RAG_PARAMS.get("RAG_batch_size", RAG_PARAMS['RAG_batch_size'])))
+        self.rag_batch_size.setCurrentText(str(self.CONFIG['rag_params'].get("RAG_batch_size", self.CONFIG['rag_params']['RAG_batch_size'])))
         # Add to layout
         rag_layout.addRow("RAG batch size:", self.rag_batch_size)
         ####################
@@ -596,7 +599,7 @@ class MainWindow(QMainWindow):
                     	"top_p": self.top_p_slider.value() / 100,
                         "max_new_tokens": int(self.max_tokens_input.currentText()),
                         "repetition_penalty": self.rep_penalty_slider.value() / 100,
-                        "no_repeat_ngram_size": self.no_rep_ngram_slider.value() / 100,
+                        "no_repeat_ngram_size": self.no_rep_ngram_slider.value(),
                         "use_cache": True
                         }
         
@@ -612,27 +615,58 @@ class MainWindow(QMainWindow):
                         "RAG_batch_size": int(self.rag_batch_size.currentText())
                          } 
 
-        config = {
+        self.CONFIG = {
                   "generation_params": gen_params,
                   "rag_params": rag_params
                   }
 
+        #Update Vector_lib params
+        self.Vector_lib.chunk_size = self.CONFIG["rag_params"]["chunk_size"]
+        self.Vector_lib.overlap_ratio = self.CONFIG["rag_params"]["overlap_ratio"]
+        self.Vector_lib.batch_size = self.CONFIG["rag_params"]["RAG_batch_size"]
+
+
         with open(CONFIG_PATH, "w") as f:
-            json.dump(config, f, indent=4)
+            json.dump(self.CONFIG, f, indent=4)
         
         
     def load_default_settings(self):
         print("Loading default settings")
         with open(DEF_CONFIG_PATH, "r") as f:
-            CONFIG = json.load(f)
+            self.CONFIG = json.load(f)
             
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(CONFIG, f, indent=4)
-            
-
-
-
+        #Update Vector_lib params
+        self.Vector_lib.chunk_size = self.CONFIG["rag_params"]["chunk_size"]
+        self.Vector_lib.overlap_ratio = self.CONFIG["rag_params"]["overlap_ratio"]
+        self.Vector_lib.batch_size = self.CONFIG["rag_params"]["RAG_batch_size"]
         
+        #Overwriting settings with default
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(self.CONFIG, f, indent=4)
+            
+        #Reset the display
+        #Gen params setting after default
+        self.max_tokens_input.setCurrentText(str(self.CONFIG['generation_params'].get("max_new_tokens", self.CONFIG['generation_params']['max_new_tokens'])))
+        self.temp_slider.setValue(int(self.CONFIG['generation_params']['temperature']*100))
+        self.top_p_slider.setValue(int(self.CONFIG['generation_params']['top_p']*100))
+        self.rep_penalty_slider.setValue(int(self.CONFIG['generation_params']['repetition_penalty']*100))
+        self.no_rep_ngram_slider.setValue(int(self.CONFIG['generation_params']['no_repeat_ngram_size']))
+
+
+        #Rag params setting after default
+        self.rag_max_tokens.setCurrentText(str(self.CONFIG['rag_params'].get("RAG_max_new_tokens", self.CONFIG['rag_params']['RAG_max_new_tokens'])))
+        self.rag_temp_slider.setValue(int(self.CONFIG['rag_params']['RAG_temperature']*100))
+        self.rag_top_p_slider.setValue(int(self.CONFIG['rag_params']['RAG_top_p']*100))
+        self.top_n.setCurrentText(str(self.CONFIG['rag_params'].get("top_n", self.CONFIG['rag_params']['top_n'])))
+        self.min_relevance_slider.setValue(int(self.CONFIG['rag_params']['min_relevance']*100))
+        self.absolute_cos_min_slider.setValue(int(self.CONFIG['rag_params']['absolute_cosine_min']*100))
+        self.chunk_size.setCurrentText(str(self.CONFIG['rag_params'].get("chunk_size", self.CONFIG['rag_params']['chunk_size'])))
+        self.overlap_ratio_slider.setValue(int(self.CONFIG['rag_params']['overlap_ratio']*100))
+        self.rag_batch_size.setCurrentText(str(self.CONFIG['rag_params'].get("RAG_batch_size", self.CONFIG['rag_params']['RAG_batch_size'])))
+
+            
+
+
     def show_settings(self):
         self.stack.setCurrentIndex(1)
     
@@ -898,9 +932,9 @@ class MainWindow(QMainWindow):
         # Generation parameters
         gen_kwargs = {
             **inputs,
-            "max_new_tokens": int(self.rag_max_tokens.currentText()),
-            "temperature": self.rag_temp_slider.value() / 100,
-            "top_p": self.rag_top_p_slider.value() / 100,
+            "max_new_tokens": self.CONFIG['rag_params']['RAG_max_new_tokens'],
+            "temperature": self.CONFIG['rag_params']['RAG_temperature'],
+            "top_p": self.CONFIG['rag_params']['RAG_top_p'],
             "do_sample": True,
             "eos_token_id": eos,
             "pad_token_id": self.tokenizer.pad_token_id,
@@ -934,9 +968,9 @@ class MainWindow(QMainWindow):
                                                                    queries = online_queries,
                                                                    messages = self.chat_history,
                                                                    vector_lib = self.Vector_lib,
-                                                                   top_n = RAG_PARAMS['top_n'],
-                                                                   min_relevance = RAG_PARAMS['min_relevance'],
-                                                                   absolute_cosine_min = RAG_PARAMS['absolute_cosine_min'],
+                                                                   top_n = self.CONFIG['rag_params']['top_n'],
+                                                                   min_relevance = self.CONFIG['rag_params']['min_relevance'],
+                                                                   absolute_cosine_min = self.CONFIG['rag_params']['absolute_cosine_min'],
                                                                    add_generation_prompt=True,
                                                                    TOR_search = True
                                                                    )
@@ -949,9 +983,9 @@ class MainWindow(QMainWindow):
                                                                    queries = online_queries,
                                                                    messages = self.chat_history,
                                                                    vector_lib = self.Vector_lib,
-                                                                   top_n = RAG_PARAMS['top_n'],
-                                                                   min_relevance = RAG_PARAMS['min_relevance'],
-                                                                   absolute_cosine_min = RAG_PARAMS['absolute_cosine_min'],
+                                                                   top_n = self.CONFIG['rag_params']['top_n'],
+                                                                   min_relevance = self.CONFIG['rag_params']['min_relevance'],
+                                                                   absolute_cosine_min = self.CONFIG['rag_params']['absolute_cosine_min'],
                                                                    add_generation_prompt=True,
                                                                    TOR_search = False
                                                                    )
@@ -961,7 +995,7 @@ class MainWindow(QMainWindow):
             
         elif self.RAG_local.isChecked():
             print("Using local RAG")
-            prompt, RAG_present = Functions.local_rag_chat_prompt(self.tokenizer, self.chat_history, self.Vector_lib, RAG_PARAMS['top_n'], RAG_PARAMS['min_relevance'], RAG_PARAMS['absolute_cosine_min'])
+            prompt, RAG_present = Functions.local_rag_chat_prompt(self.tokenizer, self.chat_history, self.Vector_lib, self.CONFIG['rag_params']['top_n'], self.CONFIG['rag_params']['min_relevance'], self.CONFIG['rag_params']['absolute_cosine_min'])
 
 
                 
@@ -995,13 +1029,13 @@ class MainWindow(QMainWindow):
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
 
         gen_kwargs = {
-            **GENERATION_PARAMS,   # defaults first
+            **self.CONFIG['generation_params'],   # defaults first
             **inputs,
-            "max_new_tokens": int(self.max_tokens_input.currentText()),
-            "temperature": self.temp_slider.value() / 100,
-            "top_p": self.top_p_slider.value() / 100,
-            "no_repeat_ngram_size": self.no_rep_ngram_slider.value(),   # integer
-            "repetition_penalty": self.rep_penalty_slider.value(),      # float
+            "max_new_tokens": self.CONFIG['generation_params']['max_new_tokens'],
+            "temperature": self.CONFIG['generation_params']['temperature'],
+            "top_p": self.CONFIG['generation_params']['top_p'],
+            "no_repeat_ngram_size": self.CONFIG['generation_params']['no_repeat_ngram_size'],
+            "repetition_penalty": self.CONFIG['generation_params']['repetition_penalty'],
             "streamer": streamer,
             "do_sample": True,
             "eos_token_id": eos,

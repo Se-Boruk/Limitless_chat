@@ -26,10 +26,9 @@ import json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-with open(CONFIG_PATH, "r") as f:
-    CONFIG = json.load(f)
 
-RAG_BATCH_SIZE = CONFIG["rag_params"]["RAG_batch_size"]
+
+#RAG_BATCH_SIZE = CONFIG["rag_params"]["RAG_batch_size"]
 
 class LocalEmbeddingFunction(embedding_functions.EmbeddingFunction):
     def __init__(self, st_model):
@@ -49,11 +48,12 @@ class LocalEmbeddingFunction(embedding_functions.EmbeddingFunction):
     
     
 class UniversalVectorStore:
-    def __init__(self, data_folder, chroma_db_folder, chunk_size=256, overlap_ratio=0.25, embedder_path=None):
+    def __init__(self, data_folder, chroma_db_folder, chunk_size=256, overlap_ratio=0.25, batch_size = 4, embedder_path=None):
         self.data_folder = data_folder
         self.chroma_db_dir = chroma_db_folder
         self.chunk_size = chunk_size
         self.overlap_ratio = overlap_ratio
+        self.batch_size = batch_size
 
         os.makedirs(self.chroma_db_dir, exist_ok=True)
         
@@ -306,7 +306,7 @@ class UniversalVectorStore:
     
         full_text = "".join(all_text)
         chunk_size, overlap_ratio = self.get_dynamic_chunk_size(len(full_text))
-        bs = int(RAG_BATCH_SIZE * (768/ chunk_size))
+        bs = int(self.batch_size * (768/ chunk_size))
         #print("Batch size: ",bs)
     
         # Step 2: chunk full_text (keeps multi-page paragraphs intact)
@@ -365,7 +365,7 @@ class UniversalVectorStore:
             
             chunk_size, overlap_ratio = self.get_dynamic_chunk_size(total_length)
             
-            bs = int(RAG_BATCH_SIZE * (1024/ chunk_size))
+            bs = int(self.batch_size * (1024/ chunk_size))
             #print("Batch size: ",bs)
             
             for section_num, item in enumerate(tqdm(book_items, desc="EPUB sections"), start=1):
