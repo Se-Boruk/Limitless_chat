@@ -156,7 +156,7 @@ def local_rag_chat_prompt(tokenizer, messages, vector_lib, top_n=3, min_relevanc
     return prompt, RAG_response
 
 
-def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True, TOR_search = False):
+def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, min_relevance = 0.75, absolute_cosine_min = 0.1, add_generation_prompt=True, TOR_search = False, TOR_server_on = False):
     
     #Inputs for both online and offline search
     RAG_response = (False, "None")
@@ -178,6 +178,11 @@ def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, mi
         
 
     #2 Send duckduckgo request
+    if TOR_search:
+        if not TOR_server_on:
+            print("TOR server is not online. Turn it on to enable TOR search")
+            return
+        
     rag_results_online = scrape_queries_to_dict(queries_separated, max_sites_per_query=2, verbose=True, tor = TOR_search)
     
     #3 Chunk it
@@ -268,7 +273,121 @@ def online_rag_chat_prompt(tokenizer, queries, messages, vector_lib, top_n=3, mi
 
 #Http scrapper functions
 ##################################################################################
-# ---------- small module-level helpers (defined once) ----------
+
+
+def is_ad_url(url: str) -> bool:
+    """
+    Heuristic ad/sponsored/affiliate/tracking detector.
+    Immediately blocks DuckDuckGo y.js ad_domain URLs.
+    Returns True if the URL likely points to an ad/affiliate/tracking redirect or landing page.
+    """
+    if not url:
+        return False
+
+    url_s = url.strip()
+    url_lower = url_s.lower()
+
+    # ---------- HARD BLOCK ----------
+    if url_lower.startswith("https://duckduckgo.com/y.js?ad_domain"):
+        return True
+
+    # quick sanity: only HTTP(S) URLs considered
+    if not (url_lower.startswith("http://") or url_lower.startswith("https://")):
+        return False
+
+    try:
+        from urllib.parse import urlparse, parse_qs, unquote_plus
+        import re
+    except Exception:
+        return True  # if environment broken, better safe than sorry
+
+    parsed = urlparse(url_s)
+    netloc = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    query = parsed.query or ""
+    qs = parse_qs(query)
+
+    score = 0
+
+    # ---------- Strong, explicit redirector/ad click handlers ----------
+    strong_redirectors = (
+        "duckduckgo.com/l/",
+        "bing.com/aclick",
+        "google.com/aclk",
+        "googleadservices.com",
+        "doubleclick.net",
+        "pagead2.googlesyndication",
+    )
+    for sig in strong_redirectors:
+        if sig in url_lower:
+            score += 10  # high confidence
+
+    # ---------- Ad / tracking query keys ----------
+    ad_keys = {
+        "ad_domain", "ad_provider", "ad_type", "click_metadata",
+        "rut", "u3", "msclkid", "gclid", "fbclid",
+        "utm_source", "utm_medium", "utm_campaign", "utm_term",
+        "campaignid", "adid", "placementid", "creativeid",
+        "affid", "aff_id", "affiliate", "aff", "tag", "ref", "refid", "rid",
+    }
+    present_ad_keys = set(qs.keys()) & ad_keys
+    if present_ad_keys:
+        score += 3 + min(len(present_ad_keys), 5)
+        if "utm_medium" in qs:
+            vals = [v.lower() for v in qs.get("utm_medium", []) if isinstance(v, str)]
+            if any(x in "|".join(vals) for x in ("cpc", "ppc", "paid", "affiliate", "display")):
+                score += 3
+
+    # ---------- Embedded/double-encoded redirect targets ----------
+    embedded_params = ("u", "u3", "url", "redirect", "target", "uddg", "rurl", "uinfo")
+    for p in embedded_params:
+        if p in qs:
+            for raw in qs.get(p, []):
+                decoded = unquote_plus(raw)
+                if "http://" in decoded or "https://" in decoded or ("%3a%2f%2f" in raw.lower()):
+                    score += 4
+                    if any(x in decoded.lower() for x in ("amazon.", "tripadvisor.", "tiqets.", "booking.", "aff", "partner", "affiliate")):
+                        score += 2
+
+    # ---------- Netloc / hostname heuristics ----------
+    netloc_ad_indicators = ("adservice", "adserver", "ads.", ".ads.", "tracking", "track.", "click", "clicks.", "clickserve", "affiliate", "affiliates", "partner", "partners", "sponsored", "promo", "promotions")
+    if any(tok in netloc for tok in netloc_ad_indicators):
+        score += 4
+
+    ecommerce_hosts = ("amazon.", "ebay.", "aliexpress.", "etsy.", "booking.", "tripadvisor.", "expedia.", "airbnb.")
+    if any(e in netloc for e in ecommerce_hosts):
+        score += 2
+
+    # ---------- Path heuristics ----------
+    path_flags = ("/ad", "/ads", "/adclick", "/aclick", "/clk", "/sponsored", "/sponsor", "/affiliate", "/promo", "/promotions", "/aff")
+    if any(pf in path for pf in path_flags):
+        score += 3
+
+    # ---------- Many params or very long query → tracking chain likely ----------
+    if len(qs) >= 8 or len(query) > 180:
+        score += 2
+
+    # ---------- Generic keyword scan ----------
+    generic_ad_keywords = ("advert", "ads", "sponsored", "promotion", "affiliate", "ref=", "affid", "msclkid")
+    if any(kw in url_lower for kw in generic_ad_keywords):
+        score += 1
+
+    # ---------- Weak multi-signal heuristics ----------
+    weak_signals = 0
+    if any(k in netloc for k in ("amazon.", "booking.", "tripadvisor.", "tickets-", "tiqets.")):
+        weak_signals += 1
+    if any(k in path for k in ("/search", "/s/", "/products", "/dp/")):
+        weak_signals += 1
+    if re.search(r"[?&](utm_|gclid=|fbclid=|msclkid=)", url_lower):
+        weak_signals += 1
+    if weak_signals >= 2:
+        score += 2
+
+    # ---------- Final decision ----------
+    return score >= 6
+
+
+
 def safe_get(url, params=None, retries=5, timeout=15):
     """GET with retries, random UA; returns (html or None, final_url)"""
     
@@ -289,6 +408,11 @@ def safe_get(url, params=None, retries=5, timeout=15):
         try:
             sess.headers["User-Agent"] = random.choice(USER_AGENTS)
             r = sess.get(url, params=params, timeout=timeout, allow_redirects=True)
+            
+            if is_ad_url(r.url):
+                time.sleep((2 ** attempt) + random.random())
+                continue
+            
             if r.status_code == 200:
                 return r.text, r.url
             if r.status_code in (429, 403):
@@ -351,6 +475,11 @@ def safe_get_tor(url, params=None, retries=5, timeout=15):
         try:
             r = sess.get(url, params=params, timeout=timeout,
                          allow_redirects=True, proxies=proxies)
+            
+            if is_ad_url(r.url):
+                time.sleep((2 ** attempt) + random.random())
+                continue
+            
             if r.status_code == 200:
                 return r.text, r.url
             if r.status_code in (403, 429):
@@ -513,26 +642,13 @@ def extract_main_text(html: str, min_block_words=40, top_blocks=2):
     return "\n\n".join(final_blocks).strip()
 
 
-# ---------- main pipeline (single function, blocks separated by comments) ----------
+
 def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_requests=0.5,
                            drop_empty=True, verbose=False, tor=False):
-    """
-    Returns: dict {final_url: extracted_plain_text}
-    If tor=True, launches Tor automatically via stem.
-    """
+
     per_url = {}
     seen = set()
     DUCK_URL = "https://duckduckgo.com/html/"
-
-    tor_process = None
-    if tor:
-        print("[TOR] Launching Tor process...")
-        tor_process = launch_tor_with_config(
-            config={'SocksPort': '9050'},
-            tor_cmd="C:\\Programy\\Tor\\tor\\tor.exe"
-        )
-        print("[TOR] Tor running on 127.0.0.1:9050")
-
 
     # #############  SEARCH PHASE #############
     if verbose:
@@ -603,11 +719,6 @@ def scrape_queries_to_dict(queries, max_sites_per_query=5, sleep_between_request
     # #############  FINALIZE #############
     if drop_empty:
         per_url = {u: t for u, t in per_url.items() if t and len(t) >= 20}
-
-    if tor and tor_process:
-        print("[TOR] Shutting down Tor process...")
-        tor_process.kill()
-        print("[TOR] Tor stopped.")
 
     return per_url
 ##################################################################################

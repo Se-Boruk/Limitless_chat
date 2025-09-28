@@ -19,6 +19,6 @@
         "RAG_batch_size": 8
     },
     "other": {
-        "launch_tor_on_start": false
+        "launch_tor_on_start": true
     }
 }

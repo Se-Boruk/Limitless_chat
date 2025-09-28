@@ -115,9 +115,22 @@ class MainWindow(QMainWindow):
             self.CONFIG['rag_params']['overlap_ratio'],
             self.CONFIG['rag_params']["RAG_batch_size"]
         )
-        self.Vector_lib.load_model_fp32()
-        #self.Vector_lib.load_model_fp16() # optional
-    
+        #self.Vector_lib.load_model_fp32() #optional
+        self.Vector_lib.load_model_fp16()
+        
+        
+        if self.CONFIG["other"]["launch_tor_on_start"]:
+            
+            self.launch_TOR_server()
+            
+
+            
+            
+        
+
+            
+            
+
         # --- Toolbar ---
         toolbar = QToolBar()
         self.addToolBar(toolbar)
@@ -217,6 +230,32 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
         splitter.setStretchFactor(0, 1)
     
+    
+        #TOR / search engine group
+        search_status_group = QGroupBox("Search group")
+        search_status_layout = QVBoxLayout()
+        search_status_layout.setContentsMargins(10, 20, 10, 10)
+        search_status_layout.setSpacing(8)
+        
+        
+        #Tor server switch
+        self.TOR_server_btn = QCheckBox("Tor server")
+        
+        if self.CONFIG["other"]["launch_tor_on_start"]:
+            self.TOR_server_btn.setChecked(True)
+        else:
+            self.TOR_server_btn.setChecked(False)
+            
+        self.TOR_server_btn.stateChanged.connect(self.manage_TOR_server)
+        
+        search_status_layout.addWidget(self.TOR_server_btn)
+        
+        search_status_group.setLayout(search_status_layout)
+        left_layout.addWidget(search_status_group)
+        #left_layout.addStretch()
+
+
+
         # --- RIGHT PANEL ---
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -526,11 +565,11 @@ class MainWindow(QMainWindow):
         self.TOR_on_start.setChecked(bool(self.CONFIG['other'].get("launch_tor_on_start", True)))  # default = False
 
         # Function that runs when toggled
-        def on_switch_toggled(state):
+        def TOR_on_start_switch(state):
             # Update config dict (or object) directly
             self.CONFIG["other"]["launch_tor_on_start"] = bool(state)
         
-        self.TOR_on_start.toggled.connect(on_switch_toggled)
+        self.TOR_on_start.toggled.connect(TOR_on_start_switch)
         
         other_layout.addRow("", self.TOR_on_start)
         
@@ -692,6 +731,33 @@ class MainWindow(QMainWindow):
     def show_main(self):
         self.stack.setCurrentIndex(0)
 
+
+    def manage_TOR_server(self):
+        #Turn server if button turned on, checked
+        if self.TOR_server_btn.isChecked():
+            
+            self.launch_TOR_server()
+        #Turn off if checked off
+        else:
+            self.close_TOR_server()
+
+
+
+    def launch_TOR_server(self):
+        print("[TOR] Launching Tor process...")
+        
+        self.TOR_server = Functions.launch_tor_with_config(
+                        config={'SocksPort': '9050'},
+                        tor_cmd="C:\\Programy\\Tor\\tor\\tor.exe"
+                    )
+        print("[TOR] Tor running on 127.0.0.1:9050")
+        
+        
+    def close_TOR_server(self):
+
+        print("[TOR] Shutting down Tor server...")
+        self.TOR_server.kill()
+        print("[TOR] Tor stopped.")
 
 
 
@@ -991,7 +1057,8 @@ class MainWindow(QMainWindow):
                                                                    min_relevance = self.CONFIG['rag_params']['min_relevance'],
                                                                    absolute_cosine_min = self.CONFIG['rag_params']['absolute_cosine_min'],
                                                                    add_generation_prompt=True,
-                                                                   TOR_search = True
+                                                                   TOR_search = True,
+                                                                   TOR_server_on = self.TOR_server_btn.isChecked()
                                                                    )
         
         elif self.RAG_online.isChecked():
@@ -1006,7 +1073,8 @@ class MainWindow(QMainWindow):
                                                                    min_relevance = self.CONFIG['rag_params']['min_relevance'],
                                                                    absolute_cosine_min = self.CONFIG['rag_params']['absolute_cosine_min'],
                                                                    add_generation_prompt=True,
-                                                                   TOR_search = False
+                                                                   TOR_search = False,
+                                                                   TOR_server_on = self.TOR_server_btn.isChecked()
                                                                    )
             
         
