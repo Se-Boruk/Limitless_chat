@@ -1,10 +1,12 @@
 # Ignore everything in these directories
-AI_Assistant_project/Models/*
-AI_Assistant_project/Offline_lib_doc/*
-AI_Assistant_project/Offline_lib_vector/*
+Limitless_project/Models/*
+Limitless_project/Offline_lib_doc/*
+Limitless_project/Offline_lib_vector/*
 
-AI_Assistant_project/AI_Assistant_main/__pycache__/*
-AI_Assistant_project/AI_Assistant_main/llm/__pycache__/*
+Limitless_projectLimitless_main/__pycache__/*
+Limitless_project/Limitless_main/llm/__pycache__/*
+
+Documents/*
 
 # Ignore these files
 # Example_file.txt
