@@ -28,7 +28,7 @@ Because of the point above, models are preferably run in quantized mode with opt
 ## Layout
 <img src="https://github.com/Se-Boruk/Limitless_chat/blob/master/Assets/Chat_preview.png?raw=true" alt="Limitless Logo" width="675"/>
 
-## Due to the model sizes project do not contain
+## Due to the file sizes project does not contain
 - Processed vector databse  
 You must process it on your own with available docs (books, pdfs). 
 - Models    
