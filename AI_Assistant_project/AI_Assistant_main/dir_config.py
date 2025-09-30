@@ -8,8 +8,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR_UP = os.path.dirname(BASE_DIR)
 
 #Congig variables:
-BOT_DEV_NAME = "Jesse_V0.0.0"
-BOT_NAME = "Jesse"
+BOT_DEV_NAME = "Limitless_chat"
+BOT_NAME = "Limitless_buddy"
     
 MODEL_DIR = os.path.join(BASE_DIR_UP, "Models", "Main_models")
 INIT_PROMPT_FILE = os.path.join(BASE_DIR, "init_prompt.txt")
