@@ -26,7 +26,7 @@ from dir_config import BOT_NAME, BOT_DEV_NAME
 from dir_config import MODEL_DIR, DOC_LIB_DIR, VECTOR_LIB_DIR
 
 import json
-
+import re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -1212,17 +1212,34 @@ class MainWindow(QMainWindow):
         def stream_and_store():
             full_reply = ""
             start = time.time()
+            
+            # Streaming loop (fast, no splitting/joining)
             for token in streamer:
                 full_reply += token
                 # reference to last QLabel
                 msg_widget = self.chat_layout.itemAt(self.chat_layout.count() - 2).widget()
                 msg_label = msg_widget.layout().itemAt(0 if msg_widget.layout().count() == 2 else 1).widget()
-                msg_label.setText(full_reply + token)
-                
+                msg_label.setText(full_reply)
+            
+            # --- Naive duplicate removal at the end ---
+            # Example: remove immediate repeated word or punctuation
+            words = full_reply.split()
+            cleaned_words = []
+            for i, word in enumerate(words):
+                if i == 0 or word != words[i-1]:
+                    cleaned_words.append(word)
+            full_reply = " ".join(cleaned_words)
+            
+            # Optional: normalize multiple spaces
+            full_reply = re.sub(r"\s+", " ", full_reply).strip()
+            
+            # Logging
             elapsed = time.time() - start
             rate = len(full_reply.split()) / elapsed if elapsed > 0 else 0
             self.log(f"{BOT_NAME}: {full_reply[:30] + '...' if len(full_reply) > 30 else full_reply}")
             self.log(f"Response done in {elapsed:.2f}s ({rate:.1f} tok/s)")
+            
+            # Store final assistant message
             self.chat_history.append({"role": "assistant", "content": full_reply})
 
         threading.Thread(target=stream_and_store, daemon=True).start()

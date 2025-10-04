@@ -1,6 +1,6 @@
 {
     "generation_params": {
-        "temperature": 0.1,
+        "temperature": 0.2,
         "top_p": 0.85,
         "max_new_tokens": 512,
         "repetition_penalty": 1.3,
