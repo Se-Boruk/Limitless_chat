@@ -553,6 +553,45 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(5, 5, 5, 5)
         right_layout.setSpacing(10)
         
+        #Model loading params
+        ######################################
+        model_load_group = QGroupBox("Model loading params")
+        model_load_layout = QFormLayout()
+        model_load_layout.setContentsMargins(10, 20, 10, 10)
+        model_load_layout.setSpacing(8)
+        
+        
+        # Define full names, internal codes, and tooltips
+        model_quant_display = [
+            ("FP16 (half precision)", 16, "Full model quality, uses ~2x less memory than FP32."),
+            ("8-bit integer", 8, "Saves memory, minimal accuracy drop (~1-2%)."),
+            ("4-bit NF4 double quant", 4, "Maximum VRAM saving, tiny accuracy drop (~0-3%). Production-safe.")
+        ]
+        
+        # Add options to combo box
+        self.model_quant_options = QComboBox()
+        self.model_quant_options.setEditable(False)
+        self.model_quant_options.setMaximumHeight(25)
+        
+        # Populate combo box with tooltip
+        for name, code, tooltip in model_quant_display:
+            self.model_quant_options.addItem(name, code)          # store numeric code
+            index = self.model_quant_options.count() - 1
+            self.model_quant_options.setItemData(index, tooltip, Qt.ToolTipRole)
+        
+        # Set default value
+        q = self.CONFIG['model_load_params'].get("quantization")
+        quant_name = next((name for name, code, _ in model_quant_display if code == q), None)
+        self.model_quant_options.setCurrentText(quant_name)
+        
+        # Add to layout
+        model_load_layout.addRow("Model quant:", self.model_quant_options)
+        
+
+        
+        model_load_group.setLayout(model_load_layout)
+        right_layout.addWidget(model_load_group)
+        ###########################################
         # Generation Params Group
         other_group = QGroupBox("Other parameters")
         other_layout = QFormLayout()
@@ -666,6 +705,19 @@ class MainWindow(QMainWindow):
                         "RAG_batch_size": int(self.rag_batch_size.currentText())
                          } 
         
+        
+        model_quant_display = [
+            ("FP16 (half precision)", 16),
+            ("8-bit integer", 8),
+            ("4-bit NF4 double quant", 4)
+        ]
+        quant_name = str(self.model_quant_options.currentText())
+        q = next((code for name, code in model_quant_display if name == quant_name), None)
+        
+        model_load_params = {
+                            "quantization": int(q),
+                            }        
+        
         other =         {
                         "launch_tor_on_start": bool(self.CONFIG['other'].get("launch_tor_on_start", True))
                         }
@@ -673,6 +725,7 @@ class MainWindow(QMainWindow):
         self.CONFIG = {
                   "generation_params": gen_params,
                   "rag_params": rag_params,
+                  "model_load_params": model_load_params,
                   "other": other
                   }
 
@@ -719,6 +772,18 @@ class MainWindow(QMainWindow):
         self.chunk_size.setCurrentText(str(self.CONFIG['rag_params'].get("chunk_size", self.CONFIG['rag_params']['chunk_size'])))
         self.overlap_ratio_slider.setValue(int(self.CONFIG['rag_params']['overlap_ratio']*100))
         self.rag_batch_size.setCurrentText(str(self.CONFIG['rag_params'].get("RAG_batch_size", self.CONFIG['rag_params']['RAG_batch_size'])))
+
+        #Model load params
+        # Set default value
+        model_quant_display = [
+            ("FP16 (half precision)", 16),
+            ("8-bit integer", 8),
+            ("4-bit NF4 double quant", 4)
+        ]
+        q = self.CONFIG['model_load_params'].get("quantization")
+        quant_name = next((name for name, code in model_quant_display if code == q), None)
+        
+        self.model_quant_options.setCurrentText(quant_name)
 
         #Other
         self.TOR_on_start.setChecked(bool(self.CONFIG['other'].get("launch_tor_on_start", True)))
@@ -940,15 +1005,27 @@ class MainWindow(QMainWindow):
     def load_model(self):
         name = self.model_dropdown.currentText()
         path = os.path.join(MODEL_DIR, name)
-        self.log(f"Loading model: {name}…")
         self.status_label.setPlainText("Loading…")
         QApplication.processEvents()
         try:
             #del self.model, self.tokenizer
             #torch.cuda.empty_cache()
             #gc.collect()
-            
-            self.llm.load(path)
+            if self.CONFIG['model_load_params']['quantization'] == 16:
+                self.log(f"Loading model [ FP16 ]: {name}…")
+                self.llm.load_fp16(path)
+                
+            elif self.CONFIG['model_load_params']['quantization'] == 8:
+                self.log(f"Loading model [ INT8 ]: {name}…")
+                self.llm.load_int8(path)
+                    
+            elif self.CONFIG['model_load_params']['quantization'] == 4:
+                self.log(f"Loading model [ INT4 ]: {name}…")
+                self.llm.load_int4(path)
+                
+            else:
+                self.model = None
+                
             self.tokenizer, self.model, self.chat_history = self.llm.get()
             self.status_label.setPlainText("Model ready")
             self.log(f"Model {name} loaded.")

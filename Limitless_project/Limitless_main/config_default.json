@@ -18,6 +18,9 @@
         "overlap_ratio": 0.25,
         "RAG_batch_size": 8
     },
+    "model_load_params": {
+        "quantization": 4
+    },
     "other": {
         "launch_tor_on_start": true
     }
